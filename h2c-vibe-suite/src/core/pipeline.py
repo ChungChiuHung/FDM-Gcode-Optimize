@@ -3,6 +3,7 @@ import os
 import math
 import shutil
 import argparse
+from physics.kinematics import AntiResonanceBrake
 
 # --- Path Resolution ---
 # Automatically find the project root (3 levels up from src/core/pipeline.py)
@@ -148,7 +149,19 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True):
                                 current_accel_state = new_accel
 
                     ex, ey, ez = move['end']
-                    
+
+                    # [NEW] PLUGIN: AI KINEMATIC BRAKING
+                    # If this move is a travel move, calculate if we need to soft-stop before the next extrusion
+                    if move['type'] == 'travel' and is_heavy_toolhead:
+                        travel_dist = math.hypot(ex - last_x, ey - last_y)
+                        brake_code = AntiResonanceBrake.inject_soft_stop(
+                            current_accel=current_accel_state or 5000, 
+                            speed_mm_min=mat_profile['max_travel_speed'], 
+                            distance_mm=travel_dist
+                        )
+                        if brake_code:
+                            f.write(f"{brake_code}\n")
+
                     # PLUGIN: Hardware Bounds Enforcement
                     if move.get('g_code', 1) not in (2, 3) and move.get('has_xy', True):
                         if not (HW_MIN_X <= ex <= HW_MAX_X and HW_MIN_Y <= ey <= HW_MAX_Y and ez <= HW_MAX_Z):
