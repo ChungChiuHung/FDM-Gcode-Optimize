@@ -70,15 +70,17 @@ class GCodeParser:
         line_s = line.strip()
         if not line_s: return None
 
-        if "; FEATURE:" in line_s.upper() or "; TYPE:" in line_s.upper() or "; WIPE_START" in line_s.upper():
+        # FIX-PERF: compute upper-case once and reuse for both feature detection and token parsing
+        line_upper = line_s.upper()
+        if "; FEATURE:" in line_upper or "; TYPE:" in line_upper or "; WIPE_START" in line_upper:
             self.current_feature = line_s
 
-        clean_line = line_s.split(';')[0].strip()
-        if not clean_line:
+        clean_upper = line_upper.split(';')[0].strip()
+        if not clean_upper:
             self.pending_metadata.append(line_s)
             return None
 
-        tokens = re.findall(r'([A-Z])([-+]?\d*\.?\d+)', clean_line.upper())
+        tokens = re.findall(r'([A-Z])([-+]?\d*\.?\d+)', clean_upper)
         if not tokens:
             self.pending_metadata.append(line_s)
             return None
@@ -113,7 +115,9 @@ class GCodeParser:
         if 'F' in params: self.current_f = params['F']
         
         actual_e = (params['E'] - self.current_e) if (self.is_absolute_extrusion and 'E' in params) else params.get('E', 0.0)
-        if 'E' in params: self.current_e = params['E'] if self.is_absolute_extrusion else 0.0
+        # FIX-BUG: accumulate E in relative mode instead of resetting to 0; prevents wrong delta on M82 restore
+        if 'E' in params:
+            self.current_e = params['E'] if self.is_absolute_extrusion else self.current_e + params['E']
 
         layer_to_yield = None
         if new_z != self.current_z and new_z > 0:
@@ -181,21 +185,48 @@ class PathOptimizer:
 
     @staticmethod
     def cluster_islands(islands: List[List[Dict]], threshold: float = 15.0) -> List[List[List[Dict]]]:
-        clusters = []
-        unassigned = list(islands)
-        while unassigned:
-            current_cluster = [unassigned.pop(0)]
-            clusters.append(current_cluster)
-            while True:
-                added = False
-                for i in range(len(unassigned) - 1, -1, -1):
-                    for island in current_cluster:
-                        if PathOptimizer.calculate_distance(unassigned[i][0]['start'], island[0]['start']) < threshold:
-                            current_cluster.append(unassigned.pop(i))
-                            added = True
-                            break
-                if not added: break
-        return clusters
+        # FIX-PERF: replaced O(n³) triple-loop with grid-based union-find — O(n) average case
+        n = len(islands)
+        if n == 0:
+            return []
+        if n == 1:
+            return [islands]
+
+        starts = [(isl[0]['start'][0], isl[0]['start'][1]) for isl in islands]
+
+        # Union-Find with path compression
+        parent = list(range(n))
+        def find(i: int) -> int:
+            root = i
+            while parent[root] != root:
+                root = parent[root]
+            while parent[i] != root:          # path compression
+                parent[i], i = root, parent[i]
+            return root
+        def union(i: int, j: int) -> None:
+            parent[find(i)] = find(j)
+
+        # Build spatial grid — each cell is threshold×threshold
+        cell_size = threshold
+        grid: Dict[Tuple[int, int], List[int]] = {}
+        for i, (x, y) in enumerate(starts):
+            key = (int(x / cell_size), int(y / cell_size))
+            grid.setdefault(key, []).append(i)
+
+        # Union islands that are within threshold of each other
+        for i, (x, y) in enumerate(starts):
+            cx, cy = int(x / cell_size), int(y / cell_size)
+            for dcx in (-1, 0, 1):
+                for dcy in (-1, 0, 1):
+                    for j in grid.get((cx + dcx, cy + dcy), []):
+                        if j > i and math.hypot(x - starts[j][0], y - starts[j][1]) < threshold:
+                            union(i, j)
+
+        cluster_map: Dict[int, List[List[Dict]]] = {}
+        for i, island in enumerate(islands):
+            root = find(i)
+            cluster_map.setdefault(root, []).append(island)
+        return list(cluster_map.values())
 
     @staticmethod
     def serpentine_sort(islands: List[List[Dict]], lane_width: float = 3.0) -> List[List[Dict]]:
@@ -235,6 +266,10 @@ class PathOptimizer:
                 islands.append(current)
                 current = []
         if current: islands.append(current)
+        # FIX-BUG: flush any trailing metadata (e.g. end-of-layer temperature commands) onto last move
+        if accumulated_meta and islands:
+            last_move = islands[-1][-1]
+            last_move['metadata'] = list(last_move.get('metadata', [])) + accumulated_meta
         if not islands: return []
 
         feature_blocks, current_block, current_feat = [], [], None
@@ -285,12 +320,14 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True):
     print("[*] Initiating Generator Parsing (OOM-Safe Streaming)...")
     
     # Peek at header for configs without parsing entire file
+    # FIX-PERF: accumulate lines in a list then join once — avoids O(n²) string concatenation
     with open(input_path, 'r', encoding='utf-8', errors='ignore') as f:
-        header_text = ""
+        header_lines_acc = []
         for line in f:
-            header_text += line
+            header_lines_acc.append(line)
             if ";===== print body =====" in line.lower() or "LAYER_CHANGE" in line:
                 break
+        header_text = "".join(header_lines_acc)
                 
     filament_type = _detect_filament_type(header_text)
     
@@ -444,7 +481,9 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True):
                     f_val = move['feedrate']
                     if move['type'] == 'travel':
                         f_val = min(f_val, mat_profile['max_travel_speed'])
-                    else:
+                    elif move.get('has_xy', True):
+                        # FIX-BUG: only scale feedrate for XY extrusion moves;
+                        # retraction/de-retraction (E-only) speeds are slicer-calibrated and must not be altered
                         f_val *= mat_profile['speed_multiplier']
                     
                     e_val, g_cmd = move['e_val'], move.get('g_code', 1)

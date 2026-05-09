@@ -60,7 +60,7 @@
 
             <div id="loading-indicator" class="hidden text-center py-4">
                 <i data-lucide="loader-2" class="w-8 h-8 text-blue-500 animate-spin mx-auto mb-2"></i>
-                <p class="text-sm text-slate-400" id="loading-text">Parsing Geometry...</p>
+                <p class="text-sm text-slate-400" id="loading-text">Parsing Geometry & Kinematics...</p>
             </div>
 
             <!-- Dashboard -->
@@ -73,28 +73,69 @@
                         <span class="px-2 py-1 bg-slate-900 text-blue-400 text-xs rounded border border-slate-700 font-mono" id="current-layer-badge">L: 0</span>
                     </div>
                     <input type="range" id="layer-slider" min="0" max="0" value="0" class="w-full mb-2">
-                    <div class="flex justify-between text-xs text-slate-400 font-mono">
+                    <div class="flex justify-between text-xs text-slate-400 font-mono mb-3">
                         <span id="stat-z-height">Z: 0.00 mm</span>
                         <span id="stat-layer-total">0 Layers</span>
                     </div>
+                    <div class="flex items-center gap-2">
+                        <button id="btn-layer-prev" title="Previous Layer" class="flex-1 flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white py-1.5 rounded-lg transition text-xs font-semibold">
+                            <i data-lucide="chevron-down" class="w-3 h-3"></i> Prev
+                        </button>
+                        <button id="btn-layer-next" title="Next Layer" class="flex-1 flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white py-1.5 rounded-lg transition text-xs font-semibold">
+                            Next <i data-lucide="chevron-up" class="w-3 h-3"></i>
+                        </button>
+                    </div>
                 </div>
 
-                <!-- Nozzle Kinematic Slider -->
+                <!-- Nozzle Kinematic Player -->
                 <div class="p-4 bg-slate-800/80 border border-blue-900/50 rounded-xl shadow-inner relative overflow-hidden">
                     <div class="absolute top-0 right-0 w-16 h-16 bg-blue-500/10 rounded-bl-full pointer-events-none"></div>
-                    <div class="flex justify-between items-center mb-3">
+                    <div class="flex justify-between items-center mb-2">
                         <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
                             <i data-lucide="crosshair" class="w-3 h-3 text-blue-400"></i> Nozzle Timeline
                         </h3>
+                        <span id="stat-path-moves" class="text-slate-500 font-mono text-[10px]">0 / 0</span>
                     </div>
-                    
+
                     <input type="range" id="path-slider" min="0" max="0" value="0" class="w-full mb-3">
-                    
-                    <div class="flex justify-between items-center text-xs">
-                        <button id="btn-play" class="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded transition">
-                            <i data-lucide="play" class="w-3 h-3"></i> Play
+
+                    <!-- Playback Controls Row -->
+                    <div class="flex items-center gap-2 mb-3">
+                        <button id="btn-rewind" title="Rewind to Start" class="flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition" style="width:2rem;height:2rem;min-width:2rem">
+                            <i data-lucide="skip-back" class="w-3 h-3"></i>
                         </button>
-                        <span id="stat-path-moves" class="text-slate-400 font-mono text-[10px]">Move 0 / 0</span>
+                        <button id="btn-play" class="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg transition font-semibold text-sm">
+                            <i data-lucide="play" class="w-4 h-4"></i> Play
+                        </button>
+                        <button id="btn-fast-forward" title="Jump to End" class="flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition" style="width:2rem;height:2rem;min-width:2rem">
+                            <i data-lucide="skip-forward" class="w-3 h-3"></i>
+                        </button>
+                    </div>
+
+                    <!-- Speed Control -->
+                    <div>
+                        <div class="flex justify-between text-xs text-slate-400 mb-1">
+                            <span>Playback Speed</span>
+                            <span id="speed-label" class="text-blue-400 font-mono font-bold">1&times;</span>
+                        </div>
+                        <input type="range" id="speed-slider" min="0" max="9" step="1" value="4" class="w-full">
+                        <div class="flex justify-between text-slate-500 mt-1 font-mono" style="font-size:9px">
+                            <span>1/16</span><span>⅛</span><span>¼</span><span>½</span><span>1×</span><span>2×</span><span>5×</span><span>10×</span><span>25×</span><span>50×</span>
+                        </div>
+                    </div>
+
+                    <!-- Live Velocity & Camera Tracking -->
+                    <div class="flex justify-between items-center mt-3 pt-3 border-t border-slate-700">
+                        <label class="flex items-center space-x-2 cursor-pointer">
+                            <input type="checkbox" id="toggle-follow" class="form-checkbox h-4 w-4 text-blue-500 rounded bg-slate-700 border-slate-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                            <span class="text-xs text-slate-400 flex items-center gap-1">
+                                <i data-lucide="navigation" class="w-3 h-3 text-blue-400"></i> Follow
+                            </span>
+                        </label>
+                        <div class="flex items-center gap-1 text-xs text-slate-400" title="Live Kinematic Velocity">
+                            <i data-lucide="gauge" class="w-3 h-3" id="icon-velocity"></i>
+                            <span id="stat-velocity" class="text-slate-400 font-mono font-bold w-16 text-right">0 mm/s</span>
+                        </div>
                     </div>
                 </div>
 
@@ -124,283 +165,356 @@
             <i data-lucide="focus" class="w-5 h-5 group-hover:text-blue-400 transition"></i>
         </button>
         
+        <!-- Velocity Legend -->
+        <div id="velocity-legend" class="absolute top-6 right-6 bg-slate-800/80 p-3 rounded-xl border border-slate-600 shadow-lg backdrop-blur hidden pointer-events-none">
+            <div class="text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider text-center">Speed</div>
+            <div class="flex h-32 gap-2">
+                <div class="w-3 rounded bg-gradient-to-t from-blue-500 via-green-500 to-red-500"></div>
+                <div class="flex flex-col justify-between text-[10px] text-slate-300 font-mono">
+                    <span id="legend-max">0</span>
+                    <span id="legend-min">0</span>
+                </div>
+            </div>
+        </div>
+
         <div id="three-canvas" class="w-full h-full"></div>
     </div>
 
     <script>
         lucide.createIcons();
 
-        // --- Core Application State ---
+        // ==========================================
+        // STATE
+        // ==========================================
         let parsedData = { layers: [], bounds: null };
         let currentLayerIndex = 0;
-        let currentPathIndex = 0;
-        let isPlaying = false;
-        let playAnimationId = null;
+        let currentPathIndex  = 0;
+        let isPlaying         = false;
+        let playAnimationId   = null;
 
-        // --- Three.js Globals ---
-        let scene, camera, renderer, controls;
-        let bedGrid, nozzleMesh;
-        let objectGroup = new THREE.Group();
-        let historyMesh = null;       // The faint completed layers below
-        let currentLayerMesh = null;  // The bright extrusions on the current layer
-        let travelMesh = null;        // The red travel moves
-
-        // UI Elements
-        const fileInput = document.getElementById('file-input');
-        const layerSlider = document.getElementById('layer-slider');
-        const pathSlider = document.getElementById('path-slider');
-        const btnPlay = document.getElementById('btn-play');
-        const toggleHistory = document.getElementById('toggle-history');
-        const toggleTravel = document.getElementById('toggle-travel');
+        const SPEED_STEPS  = [0.0625, 0.125, 0.25, 0.5, 1, 2, 5, 10, 25, 50];
+        const SPEED_LABELS = ['1/16\u00d7', '\u215b\u00d7', '\u00bc\u00d7', '\u00bd\u00d7', '1\u00d7', '2\u00d7', '5\u00d7', '10\u00d7', '25\u00d7', '50\u00d7'];
+        let playSpeed = 1;
+        let playAccum = 0;
 
         // ==========================================
-        // 1. THREE.JS INITIALIZATION
+        // THREE.JS GLOBALS
+        // ==========================================
+        let scene, camera, renderer, controls, nozzleMesh;
+        const objectGroup = new THREE.Group();
+
+        // Mesh cache — history is rebuilt only on layer change, not on every path step
+        let historyMesh          = null;
+        let historyBuiltForLayer = -1;
+        let curExtrudeMesh       = null;
+        let curTravelMesh        = null;
+
+        // DrawRange lookup tables: curExtrudeVertexAtMove[i+1] = cumulative vertex count
+        // after processing move[i], so setDrawRange(0, table[idx+1]) shows moves 0..idx.
+        let curExtrudeVertexAtMove = null;
+        let curTravelVertexAtMove  = null;
+
+        // UI refs
+        const fileInput     = document.getElementById('file-input');
+        const layerSlider   = document.getElementById('layer-slider');
+        const pathSlider    = document.getElementById('path-slider');
+        const btnPlay       = document.getElementById('btn-play');
+        const toggleHistory = document.getElementById('toggle-history');
+        const toggleTravel  = document.getElementById('toggle-travel');
+        const velocityLabel = document.getElementById('stat-velocity');
+
+        // ==========================================
+        // 1. THREE.JS SETUP
         // ==========================================
         function initThreeJS() {
             const container = document.getElementById('three-canvas');
-            
-            // Setup Scene & Camera (Z-up coordinate system for 3D Printing)
+
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x020617); // tailwind slate-950
-            
-            // Make Z the UP axis!
-            THREE.Object3D.DefaultUp.set(0, 0, 1);
+            scene.background = new THREE.Color(0x020617);
+            THREE.Object3D.DefaultUp.set(0, 0, 1); // Z-up for 3D printing
 
             camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 2000);
             camera.position.set(0, -300, 200);
 
-            // Setup Renderer
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(container.clientWidth, container.clientHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
             container.appendChild(renderer.domElement);
 
-            // Orbit Controls
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.05;
-            controls.maxPolarAngle = Math.PI / 2 + 0.1; // Prevent going too far below the bed
+            controls.maxPolarAngle = Math.PI / 2 + 0.1;
 
-            // Lighting
-            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-            scene.add(ambientLight);
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(100, 100, 300);
-            scene.add(dirLight);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+            const dir = new THREE.DirectionalLight(0xffffff, 0.8);
+            dir.position.set(100, 100, 300);
+            scene.add(dir);
 
-            // Build Virtual Printer Bed
-            const gridSize = 300;
-            const gridDivisions = 30;
-            bedGrid = new THREE.GridHelper(gridSize, gridDivisions, 0x475569, 0x1e293b);
-            bedGrid.rotation.x = Math.PI / 2; // Rotate grid to match Z-up
+            const bedGrid = new THREE.GridHelper(300, 30, 0x475569, 0x1e293b);
+            bedGrid.rotation.x = Math.PI / 2;
             scene.add(bedGrid);
+            scene.add(new THREE.AxesHelper(50));
 
-            // Add an Axis Helper (X=Red, Y=Green, Z=Blue)
-            const axesHelper = new THREE.AxesHelper(50);
-            scene.add(axesHelper);
-
-            // Build the "Digital Twin Nozzle"
-            const nozzleGeo = new THREE.ConeGeometry(3, 8, 16);
-            nozzleGeo.translate(0, 4, 0); // Shift origin to the TIP of the cone
-            const nozzleMat = new THREE.MeshStandardMaterial({ 
-                color: 0xffd700, metalness: 0.8, roughness: 0.2 
-            });
-            nozzleMesh = new THREE.Mesh(nozzleGeo, nozzleMat);
-            nozzleMesh.rotation.x = Math.PI / 2; // Point tip down towards bed
+            // Upside-down cone nozzle: tip at local origin (0,0,0), base floats above
+            const coneH = 14;
+            const nozzleGeo = new THREE.ConeGeometry(5, coneH, 16);
+            nozzleGeo.translate(0, -coneH / 2, 0); // shift so apex = origin
+            nozzleMesh = new THREE.Mesh(nozzleGeo, new THREE.MeshStandardMaterial({
+                color: 0xff6000, emissive: 0xff2200, emissiveIntensity: 0.45,
+                metalness: 0.2, roughness: 0.5, transparent: true, opacity: 0.92
+            }));
+            nozzleMesh.rotation.x = -Math.PI / 2; // tip points -Z (toward bed)
             nozzleMesh.visible = false;
+            // Glowing tip sphere at apex
+            nozzleMesh.add(new THREE.Mesh(
+                new THREE.SphereGeometry(2, 10, 10),
+                new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xff8800, emissiveIntensity: 1.2 })
+            ));
             scene.add(nozzleMesh);
-
             scene.add(objectGroup);
 
-            // Handle Window Resize
             window.addEventListener('resize', () => {
                 camera.aspect = container.clientWidth / container.clientHeight;
                 camera.updateProjectionMatrix();
                 renderer.setSize(container.clientWidth, container.clientHeight);
             });
 
-            // Start Render Loop
-            requestAnimationFrame(animateLoop);
-        }
-
-        function animateLoop() {
-            requestAnimationFrame(animateLoop);
-            controls.update();
-            renderer.render(scene, camera);
+            // Render loop
+            (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
         }
 
         // ==========================================
-        // 2. FAST JAVASCRIPT G-CODE PARSER
+        // 2. G-CODE PARSER
         // ==========================================
         function parseGCode(text) {
             const layers = [];
             let currentLayerMoves = [];
-            let x = 0, y = 0, z = 0, e = 0;
+            let x = 0, y = 0, z = 0, e = 0, f = 0;
             let isAbs = true, isAbsE = true;
             let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            
+            let minV = Infinity, maxV = -Infinity;
+
             const lines = text.split('\n');
-            let currentLayerZ = -1; // <-- FIX: Start tracking at -1 to capture the true first layer
+            let currentLayerZ = -1;
 
             for (let i = 0; i < lines.length; i++) {
-                let cleanLine = lines[i].split(';')[0].trim().toUpperCase();
+                const cleanLine = lines[i].split(';')[0].trim().toUpperCase();
                 if (!cleanLine) continue;
 
-                if (cleanLine.startsWith('G90')) isAbs = true;
-                if (cleanLine.startsWith('G91')) isAbs = false;
-                if (cleanLine.startsWith('M82')) isAbsE = true;
-                if (cleanLine.startsWith('M83')) isAbsE = false;
-                
+                if (cleanLine === 'G90') { isAbs  = true;  continue; }
+                if (cleanLine === 'G91') { isAbs  = false; continue; }
+                if (cleanLine === 'M82') { isAbsE = true;  continue; }
+                if (cleanLine === 'M83') { isAbsE = false; continue; }
+
                 if (cleanLine.startsWith('G92')) {
-                     let eMatch = cleanLine.match(/E([-+]?\d*\.?\d+)/);
-                     if (eMatch) e = parseFloat(eMatch[1]);
+                    const m = cleanLine.match(/E([-+]?\d*\.?\d+)/);
+                    if (m) e = parseFloat(m[1]);
+                    continue;
                 }
 
-                if (cleanLine.startsWith('G0') || cleanLine.startsWith('G1') || cleanLine.startsWith('G2') || cleanLine.startsWith('G3')) {
-                    let parts = cleanLine.split(/\s+/);
-                    let params = {};
-                    for (let j = 1; j < parts.length; j++) {
-                        let p = parts[j];
-                        if (p.length > 0) params[p[0]] = parseFloat(p.substring(1));
-                    }
+                // Only process G0/G1/G2/G3
+                if (!cleanLine.startsWith('G0') && !cleanLine.startsWith('G1') &&
+                    !cleanLine.startsWith('G2') && !cleanLine.startsWith('G3')) continue;
 
-                    let nx = params.X !== undefined ? (isAbs ? params.X : x + params.X) : x;
-                    let ny = params.Y !== undefined ? (isAbs ? params.Y : y + params.Y) : y;
-                    let nz = params.Z !== undefined ? (isAbs ? params.Z : z + params.Z) : z;
+                // Parse parameters with a single regex pass (faster than split)
+                const params = {};
+                const re = /([A-Z])([-+]?\d*\.?\d+)/g;
+                let pm;
+                while ((pm = re.exec(cleanLine)) !== null) params[pm[1]] = parseFloat(pm[2]);
 
-                    let actual_e = 0;
-                    if (params.E !== undefined) {
-                        actual_e = isAbsE ? (params.E - e) : params.E;
-                        e = isAbsE ? params.E : 0;
-                    }
+                if (params.F !== undefined) f = params.F;
 
-                    let isExtrude = actual_e > 0.0001;
+                const nx = params.X !== undefined ? (isAbs  ? params.X : x + params.X) : x;
+                const ny = params.Y !== undefined ? (isAbs  ? params.Y : y + params.Y) : y;
+                const nz = params.Z !== undefined ? (isAbs  ? params.Z : z + params.Z) : z;
 
-                    // --- CRITICAL FIX: TRUE LAYER DETECTION ---
-                    // Wait for the first actual extrusion to establish the layer Z-height.
-                    // This prevents "empty" Layer 0's caused by initial Z-axis homing travels.
-                    if (isExtrude && nz > 0 && Math.abs(nz - currentLayerZ) > 0.001) {
-                        if (currentLayerZ === -1) {
-                            currentLayerZ = nz; 
-                        } else if (Math.abs(nz - currentLayerZ) > 0.05) { 
-                            if (currentLayerMoves.length > 0) {
-                                layers.push({ z: currentLayerZ, moves: currentLayerMoves });
-                                currentLayerMoves = [];
-                            }
-                            currentLayerZ = nz;
-                        }
-                    }
-
-                    let dist = Math.hypot(nx - x, ny - y);
-                    if (dist > 0.001 || Math.abs(nz - z) > 0.001) {
-                        currentLayerMoves.push({
-                            type: isExtrude ? 'extrude' : 'travel',
-                            x1: x, y1: y, z1: z,
-                            x2: nx, y2: ny, z2: nz
-                        });
-
-                        if (isExtrude) {
-                            minX = Math.min(minX, x, nx);
-                            maxX = Math.max(maxX, x, nx);
-                            minY = Math.min(minY, y, ny);
-                            maxY = Math.max(maxY, y, ny);
-                        }
-                    }
-                    x = nx; y = ny; z = nz;
+                let actual_e = 0;
+                if (params.E !== undefined) {
+                    actual_e = isAbsE ? (params.E - e) : params.E;
+                    e = isAbsE ? params.E : e + params.E;
                 }
+
+                const isExtrude = actual_e > 0.0001;
+
+                // Layer detection: a new extrusion Z that differs meaningfully = new layer
+                if (isExtrude && nz > 0 && Math.abs(nz - currentLayerZ) > 0.001) {
+                    if (currentLayerZ < 0) {
+                        currentLayerZ = nz;
+                    } else if (Math.abs(nz - currentLayerZ) > 0.05) {
+                        if (currentLayerMoves.length > 0) {
+                            layers.push({ z: currentLayerZ, moves: currentLayerMoves });
+                            currentLayerMoves = [];
+                        }
+                        currentLayerZ = nz;
+                    }
+                }
+
+                const dist = Math.hypot(nx - x, ny - y);
+                if (dist > 0.001 || Math.abs(nz - z) > 0.001) {
+                    currentLayerMoves.push({
+                        type: isExtrude ? 'extrude' : 'travel',
+                        x1: x, y1: y, z1: z, x2: nx, y2: ny, z2: nz, velocity: f
+                    });
+                    if (isExtrude) {
+                        if (nx < minX) minX = nx; if (x < minX) minX = x;
+                        if (nx > maxX) maxX = nx; if (x > maxX) maxX = x;
+                        if (ny < minY) minY = ny; if (y < minY) minY = y;
+                        if (ny > maxY) maxY = ny; if (y > maxY) maxY = y;
+                        if (f > 0) { if (f < minV) minV = f; if (f > maxV) maxV = f; }
+                    }
+                }
+                x = nx; y = ny; z = nz;
             }
-            
-            if (currentLayerMoves.length > 0 && currentLayerZ !== -1) {
+
+            if (currentLayerMoves.length > 0 && currentLayerZ >= 0)
                 layers.push({ z: currentLayerZ, moves: currentLayerMoves });
-            }
 
-            return { layers, bounds: { minX, maxX, minY, maxY } };
+            if (minV === Infinity)  minV = 0;
+            if (maxV === -Infinity) maxV = 1;
+
+            return { layers, bounds: { minX, maxX, minY, maxY, minV, maxV } };
         }
 
         // ==========================================
-        // 3. 3D GEOMETRY BUILDER (BufferGeometry for Speed)
+        // 3. COLOR UTILITY — no THREE.Color allocation, inline HSL→RGB
         // ==========================================
-        function build3DScene() {
-            // Clear existing meshes
-            if (historyMesh) objectGroup.remove(historyMesh);
-            if (currentLayerMesh) objectGroup.remove(currentLayerMesh);
-            if (travelMesh) objectGroup.remove(travelMesh);
+        // Maps velocity to [r,g,b] floats: slow=blue, fast=red
+        function velocityToRGB(v, minV, maxV) {
+            if (maxV === minV) return [0.231, 0.510, 0.965];
+            const t  = Math.max(0, Math.min(1, (v - minV) / (maxV - minV)));
+            const h6 = (1.0 - t) * 0.66 * 6; // hue in [0, 3.96]
+            const x  = 1 - Math.abs(h6 % 2 - 1);
+            if (h6 < 1) return [1, x, 0];
+            if (h6 < 2) return [x, 1, 0];
+            if (h6 < 3) return [0, 1, x];
+            return [0, x, 1]; // blue end
+        }
 
-            if (parsedData.layers.length === 0) return;
+        // ==========================================
+        // 4. GEOMETRY MANAGEMENT
+        // ==========================================
+        function disposeMesh(mesh) {
+            if (!mesh) return;
+            if (mesh.geometry) mesh.geometry.dispose();
+            if (mesh.material)  mesh.material.dispose();
+        }
 
-            const showHistory = toggleHistory.checked;
-            const showTravel = toggleTravel.checked;
-            const activeLayer = parsedData.layers[currentLayerIndex];
+        // Called on layer change: (re)build history mesh and pre-allocate
+        // the full current-layer geometry. Path progress uses drawRange — O(1).
+        function rebuildForLayer() {
+            // --- History (cached; only rebuild when layer index changes) ---
+            if (historyBuiltForLayer !== currentLayerIndex) {
+                if (historyMesh) { objectGroup.remove(historyMesh); disposeMesh(historyMesh); historyMesh = null; }
 
-            // --- 1. BUILD HISTORY MESH (Ghosted previous layers) ---
-            if (showHistory && currentLayerIndex > 0) {
-                const histPoints = [];
-                for (let i = 0; i < currentLayerIndex; i++) {
-                    for (const m of parsedData.layers[i].moves) {
-                        if (m.type === 'extrude') {
-                            histPoints.push(m.x1, m.y1, m.z1);
-                            histPoints.push(m.x2, m.y2, m.z2);
+                if (toggleHistory.checked && currentLayerIndex > 0) {
+                    let total = 0;
+                    for (let i = 0; i < currentLayerIndex; i++)
+                        for (const m of parsedData.layers[i].moves)
+                            if (m.type === 'extrude') total++;
+
+                    const pos = new Float32Array(total * 6);
+                    const col = new Float32Array(total * 6);
+                    const { minV, maxV } = parsedData.bounds;
+                    let idx = 0;
+                    for (let i = 0; i < currentLayerIndex; i++) {
+                        for (const m of parsedData.layers[i].moves) {
+                            if (m.type !== 'extrude') continue;
+                            pos.set([m.x1, m.y1, m.z1, m.x2, m.y2, m.z2], idx * 6);
+                            const [r, g, b] = velocityToRGB(m.velocity, minV, maxV);
+                            col.set([r, g, b, r, g, b], idx * 6);
+                            idx++;
                         }
                     }
-                }
-                if (histPoints.length > 0) {
                     const geo = new THREE.BufferGeometry();
-                    geo.setAttribute('position', new THREE.Float32BufferAttribute(histPoints, 3));
-                    // Dark, slightly transparent blue for history
-                    const mat = new THREE.LineBasicMaterial({ color: 0x1e3a8a, transparent: true, opacity: 0.5 });
-                    historyMesh = new THREE.LineSegments(geo, mat);
+                    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+                    historyMesh = new THREE.LineSegments(geo,
+                        new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.15 }));
                     objectGroup.add(historyMesh);
                 }
+                historyBuiltForLayer = currentLayerIndex;
             }
 
-            // --- 2. BUILD CURRENT LAYER MESH ---
-            const curExtrudePts = [];
-            const curTravelPts = [];
-            
-            // Only draw moves up to the current Nozzle Path Slider index!
-            const targetMoveIdx = Math.min(currentPathIndex, activeLayer.moves.length - 1);
-            
-            for (let i = 0; i <= targetMoveIdx; i++) {
-                const m = activeLayer.moves[i];
+            // --- Current layer: allocate full typed arrays, build drawRange tables ---
+            if (curExtrudeMesh) { objectGroup.remove(curExtrudeMesh); disposeMesh(curExtrudeMesh); curExtrudeMesh = null; }
+            if (curTravelMesh)  { objectGroup.remove(curTravelMesh);  disposeMesh(curTravelMesh);  curTravelMesh  = null; }
+
+            const moves = parsedData.layers[currentLayerIndex].moves;
+            const { minV, maxV } = parsedData.bounds;
+
+            let nE = 0, nT = 0;
+            for (const m of moves) { if (m.type === 'extrude') nE++; else nT++; }
+
+            const ePos = new Float32Array(nE * 6);
+            const eCol = new Float32Array(nE * 6);
+            const tPos = new Float32Array(nT * 6);
+
+            // +1 so index 0 = "0 vertices shown" (before any move)
+            curExtrudeVertexAtMove = new Int32Array(moves.length + 1);
+            curTravelVertexAtMove  = new Int32Array(moves.length + 1);
+
+            let ei = 0, ti = 0;
+            for (let i = 0; i < moves.length; i++) {
+                const m = moves[i];
                 if (m.type === 'extrude') {
-                    curExtrudePts.push(m.x1, m.y1, m.z1);
-                    curExtrudePts.push(m.x2, m.y2, m.z2);
-                } else if (showTravel) {
-                    curTravelPts.push(m.x1, m.y1, m.z1);
-                    curTravelPts.push(m.x2, m.y2, m.z2);
+                    ePos.set([m.x1, m.y1, m.z1, m.x2, m.y2, m.z2], ei * 6);
+                    const [r, g, b] = velocityToRGB(m.velocity, minV, maxV);
+                    eCol.set([r, g, b, r, g, b], ei * 6);
+                    ei++;
+                } else {
+                    tPos.set([m.x1, m.y1, m.z1, m.x2, m.y2, m.z2], ti * 6);
+                    ti++;
                 }
+                curExtrudeVertexAtMove[i + 1] = ei * 2; // 2 vertices per segment
+                curTravelVertexAtMove [i + 1] = ti * 2;
             }
 
-            // Current Extrusions (Bright Blue)
-            if (curExtrudePts.length > 0) {
+            if (nE > 0) {
                 const geo = new THREE.BufferGeometry();
-                geo.setAttribute('position', new THREE.Float32BufferAttribute(curExtrudePts, 3));
-                const mat = new THREE.LineBasicMaterial({ color: 0x3b82f6 }); // Tailwind blue-500
-                currentLayerMesh = new THREE.LineSegments(geo, mat);
-                objectGroup.add(currentLayerMesh);
+                geo.setAttribute('position', new THREE.BufferAttribute(ePos, 3));
+                geo.setAttribute('color',    new THREE.BufferAttribute(eCol, 3));
+                curExtrudeMesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true }));
+                objectGroup.add(curExtrudeMesh);
             }
-
-            // Current Travels (Red dashed representation via opacity)
-            if (curTravelPts.length > 0 && showTravel) {
+            if (nT > 0) {
                 const geo = new THREE.BufferGeometry();
-                geo.setAttribute('position', new THREE.Float32BufferAttribute(curTravelPts, 3));
-                const mat = new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.6 }); // Tailwind red-500
-                travelMesh = new THREE.LineSegments(geo, mat);
-                objectGroup.add(travelMesh);
-            }
-
-            // --- 3. POSITION THE NOZZLE ---
-            if (activeLayer.moves.length > 0) {
-                const lastMove = activeLayer.moves[targetMoveIdx];
-                nozzleMesh.position.set(lastMove.x2, lastMove.y2, lastMove.z2);
-                nozzleMesh.visible = true;
-            } else {
-                nozzleMesh.visible = false;
+                geo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
+                curTravelMesh = new THREE.LineSegments(geo,
+                    new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.6 }));
+                curTravelMesh.visible = toggleTravel.checked;
+                objectGroup.add(curTravelMesh);
             }
         }
 
+        // O(1): only updates drawRange + nozzle position + UI labels — no geometry rebuild
+        function updatePathView() {
+            if (!curExtrudeVertexAtMove) return;
+            const moves = parsedData.layers[currentLayerIndex].moves;
+            const idx   = Math.min(currentPathIndex, moves.length - 1);
+
+            if (curExtrudeMesh) curExtrudeMesh.geometry.setDrawRange(0, curExtrudeVertexAtMove[idx + 1]);
+            if (curTravelMesh)  {
+                curTravelMesh.geometry.setDrawRange(0, curTravelVertexAtMove[idx + 1]);
+                curTravelMesh.visible = toggleTravel.checked;
+            }
+
+            // Nozzle: world position = gcode coords + objectGroup offset
+            const m = moves[idx];
+            nozzleMesh.position.set(
+                m.x2 + objectGroup.position.x,
+                m.y2 + objectGroup.position.y,
+                m.z2
+            );
+            nozzleMesh.visible = true;
+
+            // Live readouts
+            velocityLabel.textContent = `${Math.round(m.velocity / 60)} mm/s`;
+            document.getElementById('stat-path-moves').textContent = `${idx} / ${moves.length - 1}`;
+        }
+
         // ==========================================
-        // 4. UI LOGIC & EVENTS
+        // 5. FILE LOAD & DATA INIT
         // ==========================================
         fileInput.addEventListener('change', function(e) {
             const file = e.target.files[0];
@@ -409,18 +523,18 @@
             document.getElementById('file-label').textContent = file.name;
             document.getElementById('loading-indicator').classList.remove('hidden');
             document.getElementById('stats-panel').classList.add('hidden');
-            document.getElementById('btn-center').classList.remove('hidden');
+            document.getElementById('btn-center').classList.add('hidden');
+            document.getElementById('velocity-legend').classList.add('hidden');
 
             const reader = new FileReader();
             reader.onload = function(evt) {
                 setTimeout(() => {
                     parsedData = parseGCode(evt.target.result);
                     document.getElementById('loading-indicator').classList.add('hidden');
-                    
                     if (parsedData.layers.length > 0) {
                         initDataViewer();
                     } else {
-                        alert("No printable layers found in file.");
+                        alert('No printable layers found in this file.');
                     }
                 }, 50);
             };
@@ -429,20 +543,21 @@
 
         function initDataViewer() {
             document.getElementById('stats-panel').classList.remove('hidden');
+            document.getElementById('btn-center').classList.remove('hidden');
+            document.getElementById('velocity-legend').classList.remove('hidden');
             document.getElementById('stat-layer-total').textContent = `${parsedData.layers.length} Layers`;
-            
-            // Setup Layer Slider
-            layerSlider.max = parsedData.layers.length - 1;
+            document.getElementById('legend-max').textContent = `${Math.round(parsedData.bounds.maxV / 60)} mm/s`;
+            document.getElementById('legend-min').textContent = `${Math.round(parsedData.bounds.minV / 60)} mm/s`;
+
+            layerSlider.max   = parsedData.layers.length - 1;
             layerSlider.value = 0;
-            
-            // Center the Object in the 3D World
-            const b = parsedData.bounds;
-            const cx = (b.maxX + b.minX) / 2;
-            const cy = (b.maxY + b.minY) / 2;
-            
-            // Move the entire object group so its center is at (0,0) in the 3D world
-            objectGroup.position.set(-cx, -cy, 0);
-            
+
+            const { minX, maxX, minY, maxY } = parsedData.bounds;
+            objectGroup.position.set(-(maxX + minX) / 2, -(maxY + minY) / 2, 0);
+
+            historyBuiltForLayer = -1; // invalidate cache for new file
+            nozzleMesh.visible   = false;
+
             centerCamera();
             setLayer(0);
         }
@@ -454,58 +569,73 @@
         }
 
         function setLayer(index) {
+            stopAnimation();
             currentLayerIndex = parseInt(index);
             const layer = parsedData.layers[currentLayerIndex];
-            
+
             document.getElementById('current-layer-badge').textContent = `L: ${currentLayerIndex + 1}`;
             document.getElementById('stat-z-height').textContent = `Z: ${layer.z.toFixed(2)} mm`;
-            
-            // Setup Path (Kinematic) Slider for the new layer
-            pathSlider.max = layer.moves.length - 1;
-            pathSlider.value = layer.moves.length - 1; // Default to fully printed layer
-            setPathProgress(layer.moves.length - 1);
+
+            pathSlider.max   = layer.moves.length - 1;
+            pathSlider.value = layer.moves.length - 1;
+            currentPathIndex = layer.moves.length - 1;
+
+            rebuildForLayer();
+            updatePathView();
         }
 
         function setPathProgress(index) {
             currentPathIndex = parseInt(index);
-            const max = parsedData.layers[currentLayerIndex].moves.length - 1;
-            document.getElementById('stat-path-moves').textContent = `Move ${currentPathIndex} / ${max}`;
-            build3DScene();
+            pathSlider.value = currentPathIndex;
+            updatePathView();
         }
 
-        // Event Listeners
+        // ==========================================
+        // 6. EVENT LISTENERS
+        // ==========================================
         layerSlider.addEventListener('input', (e) => setLayer(e.target.value));
-        pathSlider.addEventListener('input', (e) => {
-            stopAnimation();
-            setPathProgress(e.target.value);
-        });
-        
-        toggleHistory.addEventListener('change', build3DScene);
-        toggleTravel.addEventListener('change', build3DScene);
+        pathSlider.addEventListener('input',  (e) => { stopAnimation(); setPathProgress(e.target.value); });
+
+        // History toggle: invalidate cache so rebuildForLayer recreates it
+        toggleHistory.addEventListener('change', () => { historyBuiltForLayer = -1; rebuildForLayer(); updatePathView(); });
+        // Travel toggle: just flip visibility — no geometry rebuild needed
+        toggleTravel.addEventListener('change', () => { if (curTravelMesh) curTravelMesh.visible = toggleTravel.checked; });
+
         document.getElementById('btn-center').addEventListener('click', centerCamera);
 
-        // --- Kinematic Playback Engine ---
+        document.getElementById('btn-layer-prev').addEventListener('click', () => {
+            if (currentLayerIndex > 0) {
+                layerSlider.value = currentLayerIndex - 1;
+                setLayer(currentLayerIndex - 1);
+            }
+        });
+        document.getElementById('btn-layer-next').addEventListener('click', () => {
+            if (currentLayerIndex < parsedData.layers.length - 1) {
+                layerSlider.value = currentLayerIndex + 1;
+                setLayer(currentLayerIndex + 1);
+            }
+        });
+
+        // ==========================================
+        // 7. PLAYBACK ENGINE
+        // ==========================================
         function togglePlay() {
             if (isPlaying) {
                 stopAnimation();
             } else {
                 isPlaying = true;
-                btnPlay.innerHTML = `<i data-lucide="square" class="w-3 h-3"></i> Stop`;
+                btnPlay.innerHTML = `<i data-lucide="pause" class="w-4 h-4"></i> Pause`;
                 lucide.createIcons();
-                
-                // If at the end of the layer, restart from 0
+                playAccum = 0;
                 const max = parsedData.layers[currentLayerIndex].moves.length - 1;
-                if (currentPathIndex >= max) {
-                    currentPathIndex = 0;
-                    pathSlider.value = 0;
-                }
+                if (currentPathIndex >= max) { currentPathIndex = 0; pathSlider.value = 0; }
                 playLoop();
             }
         }
 
         function stopAnimation() {
             isPlaying = false;
-            btnPlay.innerHTML = `<i data-lucide="play" class="w-3 h-3"></i> Play`;
+            btnPlay.innerHTML = `<i data-lucide="play" class="w-4 h-4"></i> Play`;
             lucide.createIcons();
             cancelAnimationFrame(playAnimationId);
         }
@@ -513,31 +643,41 @@
         function playLoop() {
             if (!isPlaying) return;
             const max = parsedData.layers[currentLayerIndex].moves.length - 1;
-            
-            // Advance by a chunk of moves per frame to make it watchable (e.g. 5 moves per frame)
-            currentPathIndex += 5; 
-            
-            if (currentPathIndex >= max) {
-                currentPathIndex = max;
-                pathSlider.value = currentPathIndex;
-                setPathProgress(currentPathIndex);
-                stopAnimation();
-                return;
-            }
 
-            pathSlider.value = currentPathIndex;
-            setPathProgress(currentPathIndex);
-            
-            // Optional: Make the camera follow the nozzle!
-            // const targetMove = parsedData.layers[currentLayerIndex].moves[currentPathIndex];
-            // controls.target.set(targetMove.x2 + objectGroup.position.x, targetMove.y2 + objectGroup.position.y, targetMove.z2);
-            
+            playAccum += playSpeed;
+            const steps = Math.floor(playAccum);
+            playAccum -= steps;
+
+            if (steps > 0) {
+                currentPathIndex = Math.min(currentPathIndex + steps, max);
+                setPathProgress(currentPathIndex);
+                if (currentPathIndex >= max) { stopAnimation(); return; }
+
+                if (document.getElementById('toggle-follow').checked) {
+                    const m = parsedData.layers[currentLayerIndex].moves[currentPathIndex];
+                    controls.target.lerp(
+                        new THREE.Vector3(m.x2 + objectGroup.position.x, m.y2 + objectGroup.position.y, m.z2),
+                        0.12
+                    );
+                }
+            }
             playAnimationId = requestAnimationFrame(playLoop);
         }
 
         btnPlay.addEventListener('click', togglePlay);
+        document.getElementById('btn-rewind').addEventListener('click', () => { stopAnimation(); setPathProgress(0); });
+        document.getElementById('btn-fast-forward').addEventListener('click', () => {
+            stopAnimation();
+            setPathProgress(parsedData.layers[currentLayerIndex].moves.length - 1);
+        });
+        document.getElementById('speed-slider').addEventListener('input', (e) => {
+            const i = parseInt(e.target.value);
+            playSpeed = SPEED_STEPS[i];
+            playAccum = 0;
+            document.getElementById('speed-label').textContent = SPEED_LABELS[i];
+        });
 
-        // Boot up Three.js!
+        // Boot!
         initThreeJS();
     </script>
 </body>
