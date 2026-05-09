@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geometric AI - 3D G-Code Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Three.js and OrbitControls -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0f172a; color: #e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+        
+        /* Styled Sliders */
+        input[type="range"] {
+            -webkit-appearance: none; width: 100%; background: transparent;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #3b82f6; cursor: pointer; margin-top: -6px; border: 2px solid #fff;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px; cursor: pointer; background: #334155; border-radius: 2px;
+        }
+        input[type="range"]:disabled::-webkit-slider-thumb { background: #475569; border-color: #64748b;}
+    </style>
+</head>
+<body class="flex h-screen w-screen select-none">
+
+    <!-- Left Control Panel -->
+    <div class="w-80 bg-slate-900 border-r border-slate-700 flex flex-col shadow-2xl z-10 shrink-0">
+        <div class="p-6 border-b border-slate-800">
+            <div class="flex items-center gap-3 mb-2">
+                <i data-lucide="cuboid" class="text-blue-500 w-8 h-8"></i>
+                <div>
+                    <h1 class="text-xl font-bold text-white">Geometric AI</h1>
+                    <p class="text-xs text-blue-400 font-mono tracking-wider">3D KINEMATIC VIEWER</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-6 flex-1 overflow-y-auto space-y-6">
+            <!-- File Upload -->
+            <div>
+                <label class="flex justify-center w-full h-24 px-4 transition bg-slate-800 border-2 border-slate-600 border-dashed rounded-xl appearance-none cursor-pointer hover:border-blue-500 focus:outline-none">
+                    <span class="flex items-center space-x-2">
+                        <i data-lucide="upload-cloud" class="w-6 h-6 text-slate-400"></i>
+                        <span class="font-medium text-slate-400 text-sm" id="file-label">Load .gcode file</span>
+                    </span>
+                    <input type="file" id="file-input" class="hidden" accept=".gcode" />
+                </label>
+            </div>
+
+            <div id="loading-indicator" class="hidden text-center py-4">
+                <i data-lucide="loader-2" class="w-8 h-8 text-blue-500 animate-spin mx-auto mb-2"></i>
+                <p class="text-sm text-slate-400" id="loading-text">Parsing Geometry...</p>
+            </div>
+
+            <!-- Dashboard -->
+            <div id="stats-panel" class="hidden space-y-6">
+                
+                <!-- Z-Height / Layer Slider -->
+                <div class="p-4 bg-slate-800 rounded-xl border border-slate-700 shadow-inner">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Vertical Slice (Z)</h3>
+                        <span class="px-2 py-1 bg-slate-900 text-blue-400 text-xs rounded border border-slate-700 font-mono" id="current-layer-badge">L: 0</span>
+                    </div>
+                    <input type="range" id="layer-slider" min="0" max="0" value="0" class="w-full mb-2">
+                    <div class="flex justify-between text-xs text-slate-400 font-mono">
+                        <span id="stat-z-height">Z: 0.00 mm</span>
+                        <span id="stat-layer-total">0 Layers</span>
+                    </div>
+                </div>
+
+                <!-- Nozzle Kinematic Slider -->
+                <div class="p-4 bg-slate-800/80 border border-blue-900/50 rounded-xl shadow-inner relative overflow-hidden">
+                    <div class="absolute top-0 right-0 w-16 h-16 bg-blue-500/10 rounded-bl-full pointer-events-none"></div>
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                            <i data-lucide="crosshair" class="w-3 h-3 text-blue-400"></i> Nozzle Timeline
+                        </h3>
+                    </div>
+                    
+                    <input type="range" id="path-slider" min="0" max="0" value="0" class="w-full mb-3">
+                    
+                    <div class="flex justify-between items-center text-xs">
+                        <button id="btn-play" class="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded transition">
+                            <i data-lucide="play" class="w-3 h-3"></i> Play
+                        </button>
+                        <span id="stat-path-moves" class="text-slate-400 font-mono text-[10px]">Move 0 / 0</span>
+                    </div>
+                </div>
+
+                <!-- Visibility Toggles -->
+                <div class="space-y-3 pt-2">
+                    <label class="flex items-center space-x-3 cursor-pointer group">
+                        <input type="checkbox" id="toggle-history" checked class="form-checkbox h-4 w-4 text-blue-500 rounded bg-slate-700 border-slate-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                        <span class="text-sm text-slate-300 group-hover:text-white transition flex items-center gap-2">
+                            <div class="w-3 h-3 rounded-sm bg-blue-900/80 border border-blue-700"></div> Show Printed Object
+                        </span>
+                    </label>
+                    <label class="flex items-center space-x-3 cursor-pointer group">
+                        <input type="checkbox" id="toggle-travel" checked class="form-checkbox h-4 w-4 text-blue-500 rounded bg-slate-700 border-slate-600 focus:ring-blue-500 focus:ring-offset-slate-900">
+                        <span class="text-sm text-slate-300 group-hover:text-white transition flex items-center gap-2">
+                            <div class="w-3 h-3 rounded-sm bg-red-500/50 border border-red-500"></div> Show Travel Moves
+                        </span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3D Canvas Area -->
+    <div class="flex-1 relative" id="canvas-container">
+        <!-- Center Target UI -->
+        <button id="btn-center" class="absolute bottom-6 right-6 bg-slate-800/80 hover:bg-slate-700 text-slate-300 p-3 rounded-xl border border-slate-600 shadow-lg backdrop-blur transition group hidden">
+            <i data-lucide="focus" class="w-5 h-5 group-hover:text-blue-400 transition"></i>
+        </button>
+        
+        <div id="three-canvas" class="w-full h-full"></div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // --- Core Application State ---
+        let parsedData = { layers: [], bounds: null };
+        let currentLayerIndex = 0;
+        let currentPathIndex = 0;
+        let isPlaying = false;
+        let playAnimationId = null;
+
+        // --- Three.js Globals ---
+        let scene, camera, renderer, controls;
+        let bedGrid, nozzleMesh;
+        let objectGroup = new THREE.Group();
+        let historyMesh = null;       // The faint completed layers below
+        let currentLayerMesh = null;  // The bright extrusions on the current layer
+        let travelMesh = null;        // The red travel moves
+
+        // UI Elements
+        const fileInput = document.getElementById('file-input');
+        const layerSlider = document.getElementById('layer-slider');
+        const pathSlider = document.getElementById('path-slider');
+        const btnPlay = document.getElementById('btn-play');
+        const toggleHistory = document.getElementById('toggle-history');
+        const toggleTravel = document.getElementById('toggle-travel');
+
+        // ==========================================
+        // 1. THREE.JS INITIALIZATION
+        // ==========================================
+        function initThreeJS() {
+            const container = document.getElementById('three-canvas');
+            
+            // Setup Scene & Camera (Z-up coordinate system for 3D Printing)
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x020617); // tailwind slate-950
+            
+            // Make Z the UP axis!
+            THREE.Object3D.DefaultUp.set(0, 0, 1);
+
+            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 2000);
+            camera.position.set(0, -300, 200);
+
+            // Setup Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxPolarAngle = Math.PI / 2 + 0.1; // Prevent going too far below the bed
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(100, 100, 300);
+            scene.add(dirLight);
+
+            // Build Virtual Printer Bed
+            const gridSize = 300;
+            const gridDivisions = 30;
+            bedGrid = new THREE.GridHelper(gridSize, gridDivisions, 0x475569, 0x1e293b);
+            bedGrid.rotation.x = Math.PI / 2; // Rotate grid to match Z-up
+            scene.add(bedGrid);
+
+            // Add an Axis Helper (X=Red, Y=Green, Z=Blue)
+            const axesHelper = new THREE.AxesHelper(50);
+            scene.add(axesHelper);
+
+            // Build the "Digital Twin Nozzle"
+            const nozzleGeo = new THREE.ConeGeometry(3, 8, 16);
+            nozzleGeo.translate(0, 4, 0); // Shift origin to the TIP of the cone
+            const nozzleMat = new THREE.MeshStandardMaterial({ 
+                color: 0xffd700, metalness: 0.8, roughness: 0.2 
+            });
+            nozzleMesh = new THREE.Mesh(nozzleGeo, nozzleMat);
+            nozzleMesh.rotation.x = Math.PI / 2; // Point tip down towards bed
+            nozzleMesh.visible = false;
+            scene.add(nozzleMesh);
+
+            scene.add(objectGroup);
+
+            // Handle Window Resize
+            window.addEventListener('resize', () => {
+                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(container.clientWidth, container.clientHeight);
+            });
+
+            // Start Render Loop
+            requestAnimationFrame(animateLoop);
+        }
+
+        function animateLoop() {
+            requestAnimationFrame(animateLoop);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // ==========================================
+        // 2. FAST JAVASCRIPT G-CODE PARSER
+        // ==========================================
+        function parseGCode(text) {
+            const layers = [];
+            let currentLayerMoves = [];
+            let x = 0, y = 0, z = 0, e = 0;
+            let isAbs = true, isAbsE = true;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            
+            const lines = text.split('\n');
+            let currentLayerZ = -1; // <-- FIX: Start tracking at -1 to capture the true first layer
+
+            for (let i = 0; i < lines.length; i++) {
+                let cleanLine = lines[i].split(';')[0].trim().toUpperCase();
+                if (!cleanLine) continue;
+
+                if (cleanLine.startsWith('G90')) isAbs = true;
+                if (cleanLine.startsWith('G91')) isAbs = false;
+                if (cleanLine.startsWith('M82')) isAbsE = true;
+                if (cleanLine.startsWith('M83')) isAbsE = false;
+                
+                if (cleanLine.startsWith('G92')) {
+                     let eMatch = cleanLine.match(/E([-+]?\d*\.?\d+)/);
+                     if (eMatch) e = parseFloat(eMatch[1]);
+                }
+
+                if (cleanLine.startsWith('G0') || cleanLine.startsWith('G1') || cleanLine.startsWith('G2') || cleanLine.startsWith('G3')) {
+                    let parts = cleanLine.split(/\s+/);
+                    let params = {};
+                    for (let j = 1; j < parts.length; j++) {
+                        let p = parts[j];
+                        if (p.length > 0) params[p[0]] = parseFloat(p.substring(1));
+                    }
+
+                    let nx = params.X !== undefined ? (isAbs ? params.X : x + params.X) : x;
+                    let ny = params.Y !== undefined ? (isAbs ? params.Y : y + params.Y) : y;
+                    let nz = params.Z !== undefined ? (isAbs ? params.Z : z + params.Z) : z;
+
+                    let actual_e = 0;
+                    if (params.E !== undefined) {
+                        actual_e = isAbsE ? (params.E - e) : params.E;
+                        e = isAbsE ? params.E : 0;
+                    }
+
+                    let isExtrude = actual_e > 0.0001;
+
+                    // --- CRITICAL FIX: TRUE LAYER DETECTION ---
+                    // Wait for the first actual extrusion to establish the layer Z-height.
+                    // This prevents "empty" Layer 0's caused by initial Z-axis homing travels.
+                    if (isExtrude && nz > 0 && Math.abs(nz - currentLayerZ) > 0.001) {
+                        if (currentLayerZ === -1) {
+                            currentLayerZ = nz; 
+                        } else if (Math.abs(nz - currentLayerZ) > 0.05) { 
+                            if (currentLayerMoves.length > 0) {
+                                layers.push({ z: currentLayerZ, moves: currentLayerMoves });
+                                currentLayerMoves = [];
+                            }
+                            currentLayerZ = nz;
+                        }
+                    }
+
+                    let dist = Math.hypot(nx - x, ny - y);
+                    if (dist > 0.001 || Math.abs(nz - z) > 0.001) {
+                        currentLayerMoves.push({
+                            type: isExtrude ? 'extrude' : 'travel',
+                            x1: x, y1: y, z1: z,
+                            x2: nx, y2: ny, z2: nz
+                        });
+
+                        if (isExtrude) {
+                            minX = Math.min(minX, x, nx);
+                            maxX = Math.max(maxX, x, nx);
+                            minY = Math.min(minY, y, ny);
+                            maxY = Math.max(maxY, y, ny);
+                        }
+                    }
+                    x = nx; y = ny; z = nz;
+                }
+            }
+            
+            if (currentLayerMoves.length > 0 && currentLayerZ !== -1) {
+                layers.push({ z: currentLayerZ, moves: currentLayerMoves });
+            }
+
+            return { layers, bounds: { minX, maxX, minY, maxY } };
+        }
+
+        // ==========================================
+        // 3. 3D GEOMETRY BUILDER (BufferGeometry for Speed)
+        // ==========================================
+        function build3DScene() {
+            // Clear existing meshes
+            if (historyMesh) objectGroup.remove(historyMesh);
+            if (currentLayerMesh) objectGroup.remove(currentLayerMesh);
+            if (travelMesh) objectGroup.remove(travelMesh);
+
+            if (parsedData.layers.length === 0) return;
+
+            const showHistory = toggleHistory.checked;
+            const showTravel = toggleTravel.checked;
+            const activeLayer = parsedData.layers[currentLayerIndex];
+
+            // --- 1. BUILD HISTORY MESH (Ghosted previous layers) ---
+            if (showHistory && currentLayerIndex > 0) {
+                const histPoints = [];
+                for (let i = 0; i < currentLayerIndex; i++) {
+                    for (const m of parsedData.layers[i].moves) {
+                        if (m.type === 'extrude') {
+                            histPoints.push(m.x1, m.y1, m.z1);
+                            histPoints.push(m.x2, m.y2, m.z2);
+                        }
+                    }
+                }
+                if (histPoints.length > 0) {
+                    const geo = new THREE.BufferGeometry();
+                    geo.setAttribute('position', new THREE.Float32BufferAttribute(histPoints, 3));
+                    // Dark, slightly transparent blue for history
+                    const mat = new THREE.LineBasicMaterial({ color: 0x1e3a8a, transparent: true, opacity: 0.5 });
+                    historyMesh = new THREE.LineSegments(geo, mat);
+                    objectGroup.add(historyMesh);
+                }
+            }
+
+            // --- 2. BUILD CURRENT LAYER MESH ---
+            const curExtrudePts = [];
+            const curTravelPts = [];
+            
+            // Only draw moves up to the current Nozzle Path Slider index!
+            const targetMoveIdx = Math.min(currentPathIndex, activeLayer.moves.length - 1);
+            
+            for (let i = 0; i <= targetMoveIdx; i++) {
+                const m = activeLayer.moves[i];
+                if (m.type === 'extrude') {
+                    curExtrudePts.push(m.x1, m.y1, m.z1);
+                    curExtrudePts.push(m.x2, m.y2, m.z2);
+                } else if (showTravel) {
+                    curTravelPts.push(m.x1, m.y1, m.z1);
+                    curTravelPts.push(m.x2, m.y2, m.z2);
+                }
+            }
+
+            // Current Extrusions (Bright Blue)
+            if (curExtrudePts.length > 0) {
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.Float32BufferAttribute(curExtrudePts, 3));
+                const mat = new THREE.LineBasicMaterial({ color: 0x3b82f6 }); // Tailwind blue-500
+                currentLayerMesh = new THREE.LineSegments(geo, mat);
+                objectGroup.add(currentLayerMesh);
+            }
+
+            // Current Travels (Red dashed representation via opacity)
+            if (curTravelPts.length > 0 && showTravel) {
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.Float32BufferAttribute(curTravelPts, 3));
+                const mat = new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.6 }); // Tailwind red-500
+                travelMesh = new THREE.LineSegments(geo, mat);
+                objectGroup.add(travelMesh);
+            }
+
+            // --- 3. POSITION THE NOZZLE ---
+            if (activeLayer.moves.length > 0) {
+                const lastMove = activeLayer.moves[targetMoveIdx];
+                nozzleMesh.position.set(lastMove.x2, lastMove.y2, lastMove.z2);
+                nozzleMesh.visible = true;
+            } else {
+                nozzleMesh.visible = false;
+            }
+        }
+
+        // ==========================================
+        // 4. UI LOGIC & EVENTS
+        // ==========================================
+        fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            document.getElementById('file-label').textContent = file.name;
+            document.getElementById('loading-indicator').classList.remove('hidden');
+            document.getElementById('stats-panel').classList.add('hidden');
+            document.getElementById('btn-center').classList.remove('hidden');
+
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                setTimeout(() => {
+                    parsedData = parseGCode(evt.target.result);
+                    document.getElementById('loading-indicator').classList.add('hidden');
+                    
+                    if (parsedData.layers.length > 0) {
+                        initDataViewer();
+                    } else {
+                        alert("No printable layers found in file.");
+                    }
+                }, 50);
+            };
+            reader.readAsText(file);
+        });
+
+        function initDataViewer() {
+            document.getElementById('stats-panel').classList.remove('hidden');
+            document.getElementById('stat-layer-total').textContent = `${parsedData.layers.length} Layers`;
+            
+            // Setup Layer Slider
+            layerSlider.max = parsedData.layers.length - 1;
+            layerSlider.value = 0;
+            
+            // Center the Object in the 3D World
+            const b = parsedData.bounds;
+            const cx = (b.maxX + b.minX) / 2;
+            const cy = (b.maxY + b.minY) / 2;
+            
+            // Move the entire object group so its center is at (0,0) in the 3D world
+            objectGroup.position.set(-cx, -cy, 0);
+            
+            centerCamera();
+            setLayer(0);
+        }
+
+        function centerCamera() {
+            controls.target.set(0, 0, 0);
+            camera.position.set(0, -150, 150);
+            controls.update();
+        }
+
+        function setLayer(index) {
+            currentLayerIndex = parseInt(index);
+            const layer = parsedData.layers[currentLayerIndex];
+            
+            document.getElementById('current-layer-badge').textContent = `L: ${currentLayerIndex + 1}`;
+            document.getElementById('stat-z-height').textContent = `Z: ${layer.z.toFixed(2)} mm`;
+            
+            // Setup Path (Kinematic) Slider for the new layer
+            pathSlider.max = layer.moves.length - 1;
+            pathSlider.value = layer.moves.length - 1; // Default to fully printed layer
+            setPathProgress(layer.moves.length - 1);
+        }
+
+        function setPathProgress(index) {
+            currentPathIndex = parseInt(index);
+            const max = parsedData.layers[currentLayerIndex].moves.length - 1;
+            document.getElementById('stat-path-moves').textContent = `Move ${currentPathIndex} / ${max}`;
+            build3DScene();
+        }
+
+        // Event Listeners
+        layerSlider.addEventListener('input', (e) => setLayer(e.target.value));
+        pathSlider.addEventListener('input', (e) => {
+            stopAnimation();
+            setPathProgress(e.target.value);
+        });
+        
+        toggleHistory.addEventListener('change', build3DScene);
+        toggleTravel.addEventListener('change', build3DScene);
+        document.getElementById('btn-center').addEventListener('click', centerCamera);
+
+        // --- Kinematic Playback Engine ---
+        function togglePlay() {
+            if (isPlaying) {
+                stopAnimation();
+            } else {
+                isPlaying = true;
+                btnPlay.innerHTML = `<i data-lucide="square" class="w-3 h-3"></i> Stop`;
+                lucide.createIcons();
+                
+                // If at the end of the layer, restart from 0
+                const max = parsedData.layers[currentLayerIndex].moves.length - 1;
+                if (currentPathIndex >= max) {
+                    currentPathIndex = 0;
+                    pathSlider.value = 0;
+                }
+                playLoop();
+            }
+        }
+
+        function stopAnimation() {
+            isPlaying = false;
+            btnPlay.innerHTML = `<i data-lucide="play" class="w-3 h-3"></i> Play`;
+            lucide.createIcons();
+            cancelAnimationFrame(playAnimationId);
+        }
+
+        function playLoop() {
+            if (!isPlaying) return;
+            const max = parsedData.layers[currentLayerIndex].moves.length - 1;
+            
+            // Advance by a chunk of moves per frame to make it watchable (e.g. 5 moves per frame)
+            currentPathIndex += 5; 
+            
+            if (currentPathIndex >= max) {
+                currentPathIndex = max;
+                pathSlider.value = currentPathIndex;
+                setPathProgress(currentPathIndex);
+                stopAnimation();
+                return;
+            }
+
+            pathSlider.value = currentPathIndex;
+            setPathProgress(currentPathIndex);
+            
+            // Optional: Make the camera follow the nozzle!
+            // const targetMove = parsedData.layers[currentLayerIndex].moves[currentPathIndex];
+            // controls.target.set(targetMove.x2 + objectGroup.position.x, targetMove.y2 + objectGroup.position.y, targetMove.z2);
+            
+            playAnimationId = requestAnimationFrame(playLoop);
+        }
+
+        btnPlay.addEventListener('click', togglePlay);
+
+        // Boot up Three.js!
+        initThreeJS();
+    </script>
+</body>
+</html>

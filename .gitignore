@@ -1,0 +1,18 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+env/
+venv/
+ENV/
+
+# VS Code 
+# (Keep settings.json if you want shared project settings)
+.vscode/python*
+.vscode/launch.json
+
+# Tool specific
+.uv/

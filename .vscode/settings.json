@@ -1,0 +1,12 @@
+{
+    "github.copilot.chat.experimental.mcp.enabled": true,
+    "github.copilot.chat.mcpServers": {
+        "gcode-optimizer": {
+            "command": "mcp",
+            "args": [
+                "run",
+                "${workspaceFolder}/gcode_mcp_server.py"
+            ]
+        }
+    }
+}

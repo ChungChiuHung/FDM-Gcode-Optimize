@@ -1,0 +1,19 @@
+[project]
+name = "fdm-optimize-agent"
+version = "0.1.0"
+description = "Agentic G-Code post-processing and optimization suite"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=0.1.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.23.0",
+]
+
+[tool.uv]
+managed = true
+
+[dependency-groups]
+dev = [
+    "pytest>=7.0.0",
+]
