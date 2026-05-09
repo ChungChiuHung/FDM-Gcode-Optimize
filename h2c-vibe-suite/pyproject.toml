@@ -17,3 +17,10 @@ managed = true
 dev = [
     "pytest>=7.0.0",
 ]
+
+# --- 新增這一段 ---
+# 讓 pytest 知道專案的根目錄在哪裡，這樣就能完美解析 "from src..."
+[tool.pytest.ini_options]
+pythonpath = [
+    "."
+]

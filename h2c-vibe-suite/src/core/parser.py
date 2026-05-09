@@ -17,6 +17,7 @@ class GCodeParser:
         self.header_lines = []
         self.footer_lines = []
         self.in_body = False
+        self.in_config = False # 新增狀態追蹤
         self.pending_metadata = []
 
     def parse_streaming(self, file_path: str) -> Generator[List[Dict], None, None]:
@@ -28,8 +29,18 @@ class GCodeParser:
                 line_s = line.strip()
                 if not self.in_body:
                     self.header_lines.append(line)
-                    if ";===== print body =====" in line.lower() or "LAYER_CHANGE" in line:
-                        self.in_body = True
+                    line_upper = line.upper()
+                    
+                    # 追蹤是否進入了設定區塊，防止在區塊內提早中斷
+                    if "; CONFIG_BLOCK_START" in line_upper:
+                        self.in_config = True
+                    elif "; CONFIG_BLOCK_END" in line_upper:
+                        self.in_config = False
+                        
+                    # 只有在設定區塊外部，且確實是列印主體開頭時，才切換狀態
+                    if not self.in_config:
+                        if ";===== PRINT BODY =====" in line_upper or line_upper.startswith("; LAYER_CHANGE") or line_upper.startswith(";LAYER_CHANGE"):
+                            self.in_body = True
                     continue
                 
                 if "; machine_end_gcode_start" in line.lower() or "; stop printing" in line.lower():
