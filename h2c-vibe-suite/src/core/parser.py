@@ -4,20 +4,25 @@ import math
 from typing import Generator, List, Dict, Tuple
 
 class GCodeParser:
+    # Pre-compiled once at class level — avoids repeated regex compilation
+    # on every parsed line, which dominates CPU time for >50 MB G-code files.
+    TOKEN_PATTERN = re.compile(r'([A-Z])([-+]?\d*\.?\d+)')
+
     def __init__(self):
         self.current_x, self.current_y, self.current_z = 0.0, 0.0, 0.0
         self.current_e, self.current_f = 0.0, 0.0
-        self.is_absolute_extrusion = True  
+        self.is_absolute_extrusion = False  
         self.is_absolute_position = True   
         self.current_feature = "; FEATURE: Unknown"
         
         self.current_layer_moves: List[Dict] = []
-        self.current_layer_z = None
-        
+        self.current_layer_z: float | None = None
+        self._pending_z: float | None = None  # deferred layer-change candidate (Z-hop shielding)
+
         self.header_lines = []
         self.footer_lines = []
         self.in_body = False
-        self.in_config = False # 新增狀態追蹤
+        self.in_config = False 
         self.pending_metadata = []
 
     def parse_streaming(self, file_path: str) -> Generator[List[Dict], None, None]:
@@ -31,22 +36,34 @@ class GCodeParser:
                     self.header_lines.append(line)
                     line_upper = line.upper()
                     
-                    # 追蹤是否進入了設定區塊，防止在區塊內提早中斷
+                    if "M82" in line_upper:
+                        self.is_absolute_extrusion = True
+                    elif "M83" in line_upper:
+                        self.is_absolute_extrusion = False
+                    
                     if "; CONFIG_BLOCK_START" in line_upper:
                         self.in_config = True
                     elif "; CONFIG_BLOCK_END" in line_upper:
                         self.in_config = False
                         
-                    # 只有在設定區塊外部，且確實是列印主體開頭時，才切換狀態
                     if not self.in_config:
-                        if ";===== PRINT BODY =====" in line_upper or line_upper.startswith("; LAYER_CHANGE") or line_upper.startswith(";LAYER_CHANGE"):
+                        if ("EXECUTABLE_BLOCK_START" in line_upper or
+                            ";===== PRINT BODY =====" in line_upper or
+                            line_upper.startswith("; LAYER_CHANGE") or
+                            line_upper.startswith(";LAYER_CHANGE")):
                             self.in_body = True
                     continue
                 
-                if "; machine_end_gcode_start" in line.lower() or "; stop printing" in line.lower():
+                if ("machine_end_gcode_start" in line.lower() or
+                    "; stop printing" in line.lower() or
+                    "EXECUTABLE_BLOCK_END" in line.upper()):
                     self.in_body = "FINISHED"
                 
                 if self.in_body == "FINISHED":
+                    # [!] CRITICAL FIX: 在結尾區塊前，強制輸出所有被困在記憶體中的 Metadata (如 M104 S0)
+                    if self.pending_metadata:
+                        self.footer_lines.extend([m + '\n' for m in self.pending_metadata])
+                        self.pending_metadata = []
                     self.footer_lines.append(line)
                     continue
 
@@ -61,7 +78,9 @@ class GCodeParser:
         line_s = line.strip()
         if not line_s: return False
 
-        if "; FEATURE:" in line_s.upper() or "; TYPE:" in line_s.upper() or "; WIPE_START" in line_s.upper():
+        # QUALITY FIX: Do NOT let ; WIPE_START overwrite the physical feature tag.
+        # This preserves "Outer wall" metadata during seam wipes for kinematics.py.
+        if "; FEATURE:" in line_s.upper() or "; TYPE:" in line_s.upper():
             self.current_feature = line_s
 
         clean_line = line_s.split(';')[0].strip()
@@ -69,7 +88,7 @@ class GCodeParser:
             self.pending_metadata.append(line_s)
             return False
 
-        tokens = re.findall(r'([A-Z])([-+]?\d*\.?\d+)', clean_line.upper())
+        tokens = self.TOKEN_PATTERN.findall(clean_line.upper())
         if not tokens:
             self.pending_metadata.append(line_s)
             return False
@@ -79,8 +98,15 @@ class GCodeParser:
         if cmd_let == 'G':
             if cmd_num == 90: self.is_absolute_position = True
             elif cmd_num == 91: self.is_absolute_position = False
+            elif cmd_num == 92:
+                g92_params = {let: float(val) for let, val in tokens[1:]}
+                if 'X' in g92_params: self.current_x = g92_params['X']
+                if 'Y' in g92_params: self.current_y = g92_params['Y']
+                if 'Z' in g92_params: self.current_z = g92_params['Z']
+                if 'E' in g92_params: self.current_e = g92_params['E']
             elif cmd_num in (0, 1, 2, 3): 
-                return self._handle_movement(tokens, cmd_num)
+                # [!] Pass line_s down so _handle_movement can save the raw string
+                return self._handle_movement(tokens, cmd_num, line_s)
         elif cmd_let == 'M':
             if cmd_num == 82: self.is_absolute_extrusion = True
             elif cmd_num == 83: self.is_absolute_extrusion = False
@@ -88,7 +114,7 @@ class GCodeParser:
         self.pending_metadata.append(line_s)
         return False
 
-    def _handle_movement(self, tokens: List[Tuple[str, str]], g_type: int) -> bool:
+    def _handle_movement(self, tokens: List[Tuple[str, str]], g_type: int, line_s: str) -> bool:
         params = {l: float(v) for l, v in tokens[1:]}
         start_pt = (self.current_x, self.current_y, self.current_z)
         
@@ -104,33 +130,56 @@ class GCodeParser:
         if 'F' in params: self.current_f = params['F']
         
         actual_e = (params['E'] - self.current_e) if (self.is_absolute_extrusion and 'E' in params) else params.get('E', 0.0)
-        if 'E' in params: self.current_e = params['E'] if self.is_absolute_extrusion else 0.0
+        
+        if 'E' in params:
+            self.current_e = params['E'] if self.is_absolute_extrusion else self.current_e + params['E']
 
         layer_yielded = False
         if new_z != self.current_z and new_z > 0:
-            if self.current_layer_z is None: self.current_layer_z = new_z
-            elif new_z > self.current_layer_z and len(self.current_layer_moves) > 0:
-                layer_yielded = True
+            if self.current_layer_z is None:
                 self.current_layer_z = new_z
+            elif new_z > self.current_layer_z + 0.05:
+                if len(self.current_layer_moves) > 0:
+                    self._pending_z = new_z
+            elif new_z < self.current_layer_z - 2.0 and len(self.current_layer_moves) > 0:
+                layer_yielded = True
+                self._pending_z = None
+                self.current_layer_z = new_z
+            elif new_z <= self.current_layer_z + 0.001:
+                self._pending_z = None
 
-        dist = math.hypot(new_x - self.current_x, new_y - self.current_y)
-        
-        # --- CRITICAL ARC GEAR FIX ---
         has_xy = ('X' in params or 'Y' in params or (g_type in (2, 3) and ('I' in params or 'J' in params)))
-        is_extrusion_activity = abs(actual_e) > 0.00001
         
-        if dist > 0.001 or abs(new_z - self.current_z) > 0.001 or is_extrusion_activity:
-            self.current_layer_moves.append({
-                'type': "extrude" if is_extrusion_activity and g_type in (0, 1, 2, 3) else "travel",
-                'g_code': g_type,
-                'start': start_pt, 'end': (new_x, new_y, new_z),
-                'feedrate': self.current_f, 'e_val': actual_e,
-                'has_xy': has_xy,
-                'feature': self.current_feature,
-                'i': params.get('I'), 'j': params.get('J'), 'r': params.get('R'), 'p': params.get('P'),
-                'metadata': self.pending_metadata
-            })
-            self.pending_metadata = []
+        # QUALITY FIX: Separate Positive Extrusions and Retractions
+        is_extrude = actual_e > 0.00001
+        is_retract = actual_e < -0.00001
+
+        if is_extrude and self._pending_z is not None and len(self.current_layer_moves) > 0:
+            layer_yielded = True
+            self.current_layer_z = self._pending_z
+            self._pending_z = None
+            
+        if is_extrude and g_type in (0, 1, 2, 3):
+            move_type = "extrude"
+        elif is_retract and g_type in (0, 1, 2, 3):
+            move_type = "retract"
+        else:
+            move_type = "travel"
+        
+        # [!] CRITICAL FIX: 移除距離過濾器，確保所有指令(包含 G1 F30000) 皆完整保留
+        self.current_layer_moves.append({
+            'type': move_type,
+            'g_code': g_type,
+            'start': start_pt, 'end': (new_x, new_y, new_z),
+            'feedrate': self.current_f, 'e_val': actual_e,
+            'raw_e': params.get('E'),
+            'has_xy': has_xy,
+            'feature': self.current_feature,
+            'i': params.get('I'), 'j': params.get('J'), 'r': params.get('R'), 'p': params.get('P'),
+            'metadata': self.pending_metadata,
+            'raw_line': line_s
+        })
+        self.pending_metadata = []
             
         self.current_x, self.current_y, self.current_z = new_x, new_y, new_z
         return layer_yielded

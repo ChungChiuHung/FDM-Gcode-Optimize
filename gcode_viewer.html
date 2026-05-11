@@ -3,682 +3,1122 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Geometric AI - 3D G-Code Viewer</title>
+    <title>H2C G-Code Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
-    <!-- Three.js and OrbitControls -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-    
+
     <style>
-        body { margin: 0; overflow: hidden; background-color: #0f172a; color: #e2e8f0; font-family: ui-sans-serif, system-ui, sans-serif; }
-        
-        /* Custom Scrollbar */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #1e293b; }
-        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
-        
-        /* Styled Sliders */
-        input[type="range"] {
-            -webkit-appearance: none; width: 100%; background: transparent;
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+        /* ═══ DESIGN TOKENS ═══ */
+        :root {
+            --bg:          #0b1120;
+            --surface:     rgba(13,20,38,0.88);
+            --border:      rgba(255,255,255,0.07);
+            --shadow:      0 8px 32px rgba(0,0,0,0.55), 0 1px 0 rgba(255,255,255,0.05) inset;
+            --text-1:      #f1f5f9;
+            --text-2:      #94a3b8;
+            --text-3:      #4a6280;
+            --accent:      #3b82f6;
+            --accent-dim:  rgba(59,130,246,0.14);
+            --accent-glow: rgba(59,130,246,0.40);
+            --green:       #34d399;
+            --yellow:      #fbbf24;
+            --track:       rgba(255,255,255,0.09);
+            --sw-off:      #263345;
+            --row-sep:     rgba(255,255,255,0.04);
+            --pill-bg:     rgba(255,255,255,0.06);
         }
-        input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none; height: 16px; width: 16px; border-radius: 50%; background: #3b82f6; cursor: pointer; margin-top: -6px; border: 2px solid #fff;
+
+        body.light {
+            --bg:          #eef2f8;
+            --surface:     rgba(255,255,255,0.90);
+            --border:      rgba(0,0,0,0.09);
+            --shadow:      0 4px 20px rgba(0,0,0,0.09), 0 1px 3px rgba(0,0,0,0.05);
+            --text-1:      #0f172a;
+            --text-2:      #475569;
+            --text-3:      #94a3b8;
+            --accent:      #2563eb;
+            --accent-dim:  rgba(37,99,235,0.10);
+            --accent-glow: rgba(37,99,235,0.25);
+            --green:       #059669;
+            --yellow:      #b45309;
+            --track:       rgba(0,0,0,0.09);
+            --sw-off:      #cbd5e1;
+            --row-sep:     rgba(0,0,0,0.05);
+            --pill-bg:     rgba(0,0,0,0.05);
         }
-        input[type="range"]::-webkit-slider-runnable-track {
-            width: 100%; height: 4px; cursor: pointer; background: #334155; border-radius: 2px;
+
+        /* ═══ BASE ═══ */
+        *, *::before, *::after { box-sizing:border-box; }
+        body {
+            margin:0; overflow:hidden; background:var(--bg); color:var(--text-1);
+            font-family:'Inter',ui-sans-serif,system-ui,sans-serif;
+            font-size:13px; line-height:1.5; transition:background .35s, color .25s;
         }
-        input[type="range"]:disabled::-webkit-slider-thumb { background: #475569; border-color: #64748b;}
+
+        /* ═══ SCROLLBARS ═══ */
+        ::-webkit-scrollbar { width:4px; }
+        ::-webkit-scrollbar-track { background:transparent; }
+        ::-webkit-scrollbar-thumb { background:var(--text-3); border-radius:4px; }
+        ::-webkit-scrollbar-thumb:hover { background:var(--text-2); }
+
+        /* ═══ GLASS ═══ */
+        .glass {
+            background:var(--surface);
+            backdrop-filter:blur(24px) saturate(1.3);
+            -webkit-backdrop-filter:blur(24px) saturate(1.3);
+            border:1px solid var(--border);
+            box-shadow:var(--shadow);
+        }
+
+        /* ═══ RANGE INPUTS ═══ */
+        input[type=range] { -webkit-appearance:none; outline:none; background:transparent; cursor:pointer; }
+        input[type=range]::-webkit-slider-runnable-track {
+            height:4px; border-radius:4px; background:var(--track);
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+            background:var(--accent); cursor:pointer; margin-top:-5px;
+            box-shadow:0 0 0 3px var(--accent-dim), 0 0 8px var(--accent-glow);
+            transition:transform .12s, box-shadow .12s;
+        }
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform:scale(1.25);
+            box-shadow:0 0 0 5px var(--accent-dim), 0 0 14px var(--accent-glow);
+        }
+        input[type=range].vslider {
+            writing-mode:vertical-lr; direction:rtl;
+            -webkit-appearance:slider-vertical; appearance:slider-vertical;
+            width:6px; height:100%; min-height:0; flex:1 1 0;
+        }
+        input[type=range].vslider::-webkit-slider-runnable-track { width:4px; }
+        input[type=range].vslider::-webkit-slider-thumb { margin-top:0; margin-left:-5px; }
+
+        /* ═══ TOGGLE SWITCH ═══ */
+        .sw input { display:none; }
+        .sw-track {
+            width:34px; height:18px; border-radius:9px; background:var(--sw-off);
+            position:relative; cursor:pointer; transition:background .22s; flex-shrink:0;
+        }
+        .sw input:checked ~ .sw-track { background:var(--accent); }
+        .sw-thumb {
+            width:12px; height:12px; background:#fff; border-radius:50%;
+            position:absolute; top:3px; left:3px;
+            transition:left .22s cubic-bezier(.4,0,.2,1); pointer-events:none;
+            box-shadow:0 1px 3px rgba(0,0,0,0.3);
+        }
+        .sw input:checked ~ .sw-track .sw-thumb { left:19px; }
+
+        /* ═══ TABS ═══ */
+        .tab-btn {
+            padding:4px 10px; font-size:11px; font-weight:600; letter-spacing:.04em;
+            border-radius:6px; cursor:pointer; color:var(--text-2);
+            transition:all .15s; border:none; background:transparent;
+        }
+        .tab-btn:hover { color:var(--text-1); background:var(--accent-dim); }
+        .tab-btn.active { background:var(--accent); color:#fff; box-shadow:0 2px 8px var(--accent-glow); }
+        .tab-pane { display:none; }
+        .tab-pane.active { display:block; }
+
+        /* ═══ PARAM TABLE ═══ */
+        .section-head {
+            font-size:9px; font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+            color:var(--text-3); padding:10px 0 4px;
+            display:flex; align-items:center; gap:6px;
+        }
+        .section-head::before {
+            content:''; width:3px; height:10px; border-radius:2px;
+            background:var(--accent); flex-shrink:0;
+        }
+        .param-row {
+            display:flex; justify-content:space-between; align-items:center;
+            padding:5px 0; border-bottom:1px solid var(--row-sep);
+        }
+        .param-row:last-child { border-bottom:none; }
+        .param-key { font-size:11px; color:var(--text-2); }
+        .param-val { font-size:11px; font-family:'JetBrains Mono',monospace; color:var(--text-1); font-weight:600; }
+        .param-val.hi   { color:var(--green); }
+        .param-val.warn { color:var(--yellow); }
+
+        /* ═══ MISC COMPONENTS ═══ */
+        .swatch { width:10px; height:10px; border-radius:3px; flex-shrink:0;
+                  border:1px solid rgba(255,255,255,.18); }
+
+        #speed-legend-bar {
+            background:linear-gradient(to right,#3b82f6,#22d3ee,#a3e635,#facc15,#ef4444);
+            height:4px; border-radius:3px;
+        }
+
+        body.dragover::after {
+            content:'Drop G-code Here';
+            position:fixed; inset:0; z-index:200;
+            display:flex; align-items:center; justify-content:center;
+            font-size:2rem; font-weight:700; color:var(--accent);
+            background:var(--accent-dim); border:2px dashed var(--accent);
+            pointer-events:none; backdrop-filter:blur(4px);
+        }
+
+        /* ═══ HUD PILLS ═══ */
+        .hud-pill {
+            display:flex; align-items:center; gap:5px; padding:3px 10px;
+            background:var(--pill-bg); border-radius:999px;
+            font-size:11px; font-family:'JetBrains Mono',monospace;
+            color:var(--text-2); border:1px solid var(--border);
+        }
+        .hud-pill span { color:var(--text-1); font-weight:600; }
+        .move-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
+
+        /* ═══ KBD ═══ */
+        kbd {
+            padding:2px 6px; background:var(--pill-bg); border-radius:5px;
+            font-size:10px; font-family:'JetBrains Mono',monospace; color:var(--text-2);
+            border:1px solid var(--border); box-shadow:0 1px 0 var(--border);
+        }
+
+        /* ═══ COLOR MODE BUTTONS ═══ */
+        .color-mode-btn {
+            flex:1; padding:4px 0; font-size:10px; font-weight:600; letter-spacing:.03em;
+            background:var(--pill-bg); border:1px solid var(--border);
+            border-radius:6px; color:var(--text-2); cursor:pointer; transition:all .15s;
+        }
+        .color-mode-btn:hover { background:var(--accent-dim); color:var(--accent); border-color:var(--accent); }
+        .color-mode-btn.active { background:var(--accent); color:#fff; border-color:var(--accent); box-shadow:0 2px 8px var(--accent-glow); }
+
+        .feat-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; display:inline-block; }
+
+        /* ═══ PANEL BUTTONS (theme toggle, plate color) ═══ */
+        .panel-btn {
+            display:flex; align-items:center; justify-content:center; gap:6px;
+            width:100%; padding:7px 0; border-radius:9px;
+            font-size:11px; font-weight:600; color:var(--text-2);
+            background:var(--pill-bg); border:1px solid var(--border);
+            cursor:pointer; transition:all .18s;
+        }
+        .panel-btn:hover { background:var(--accent-dim); color:var(--accent); border-color:var(--accent); }
+
+        /* ═══ ICON BUTTONS (playback, layer nav) ═══ */
+        .icon-btn {
+            display:inline-flex; align-items:center; justify-content:center;
+            padding:7px; border-radius:10px; color:var(--text-2);
+            transition:background .15s, color .15s; border:none; background:transparent; cursor:pointer;
+        }
+        .icon-btn:hover { background:var(--accent-dim); color:var(--accent); }
+
+        /* ═══ ADAPTIVE OVERRIDES (tokens beat Tailwind utilities in light mode) ═══ */
+        body .text-slate-500, body .text-slate-400 { color:var(--text-2); }
+        body .text-slate-300 { color:var(--text-2); }
+        body #layer-label, body #speed-label { color:var(--accent) !important; }
+        body #move-current, body #move-total, body #layer-z-label,
+        body .text-slate-500.block { color:var(--text-3); }
+        body h1 { color:var(--text-1); }
+        body #file-name-display { color:var(--text-3); }
+        body .bg-slate-800\/50 { background:var(--pill-bg) !important; }
+        body .text-slate-200 { color:var(--text-1) !important; }
+        body label.relative.flex { color:var(--text-2); border-color:var(--border); }
+        body label.relative.flex:hover { background:var(--accent-dim); border-color:var(--accent); color:var(--accent); }
+        body .border-t.border-slate-700 { border-color:var(--border) !important; }
+        body i[data-lucide="gauge"] { color:var(--text-3); }
+        body #legend-min, body #legend-max { color:var(--text-2); }
+        body #feature-legend-items span { color:var(--text-2); }
     </style>
 </head>
-<body class="flex h-screen w-screen select-none">
+<body id="drop-zone" class="light">
 
-    <!-- Left Control Panel -->
-    <div class="w-80 bg-slate-900 border-r border-slate-700 flex flex-col shadow-2xl z-10 shrink-0">
-        <div class="p-6 border-b border-slate-800">
-            <div class="flex items-center gap-3 mb-2">
-                <i data-lucide="cuboid" class="text-blue-500 w-8 h-8"></i>
-                <div>
-                    <h1 class="text-xl font-bold text-white">Geometric AI</h1>
-                    <p class="text-xs text-blue-400 font-mono tracking-wider">3D KINEMATIC VIEWER</p>
-                </div>
+<!-- Loading Overlay -->
+<div id="loading-overlay" class="fixed inset-0 z-50 hidden flex flex-col items-center justify-center bg-slate-950/85 backdrop-blur-sm">
+    <div class="relative mb-5">
+        <i data-lucide="cpu" class="w-14 h-14 text-blue-400"></i>
+        <span class="absolute -bottom-1 -right-1 w-5 h-5 bg-blue-500 rounded-full animate-ping opacity-75"></span>
+    </div>
+    <h2 class="text-xl font-bold text-white tracking-widest uppercase">Parsing G-Code…</h2>
+    <p class="text-slate-400 mt-2 text-sm" id="loading-progress">Building spatial index</p>
+</div>
+
+<!-- Canvas -->
+<div id="canvas-container" class="fixed inset-0 z-0"></div>
+
+<!-- LEFT PANEL -->
+<div class="fixed top-5 left-5 z-10 w-72 flex flex-col gap-3">
+    <div class="glass rounded-2xl p-4 flex flex-col gap-3">
+        <div class="flex items-center gap-3">
+            <div class="p-2 bg-blue-600/20 rounded-xl">
+                <i data-lucide="layers" class="w-5 h-5 text-blue-400"></i>
+            </div>
+            <div class="min-w-0">
+                <h1 class="text-sm font-bold leading-tight">H2C G-Code Viewer</h1>
+                <p id="file-name-display" class="text-xs text-slate-500 truncate">No file loaded</p>
             </div>
         </div>
-
-        <div class="p-6 flex-1 overflow-y-auto space-y-6">
-            <!-- File Upload -->
-            <div>
-                <label class="flex justify-center w-full h-24 px-4 transition bg-slate-800 border-2 border-slate-600 border-dashed rounded-xl appearance-none cursor-pointer hover:border-blue-500 focus:outline-none">
-                    <span class="flex items-center space-x-2">
-                        <i data-lucide="upload-cloud" class="w-6 h-6 text-slate-400"></i>
-                        <span class="font-medium text-slate-400 text-sm" id="file-label">Load .gcode file</span>
-                    </span>
-                    <input type="file" id="file-input" class="hidden" accept=".gcode" />
-                </label>
-            </div>
-
-            <div id="loading-indicator" class="hidden text-center py-4">
-                <i data-lucide="loader-2" class="w-8 h-8 text-blue-500 animate-spin mx-auto mb-2"></i>
-                <p class="text-sm text-slate-400" id="loading-text">Parsing Geometry & Kinematics...</p>
-            </div>
-
-            <!-- Dashboard -->
-            <div id="stats-panel" class="hidden space-y-6">
-                
-                <!-- Z-Height / Layer Slider -->
-                <div class="p-4 bg-slate-800 rounded-xl border border-slate-700 shadow-inner">
-                    <div class="flex justify-between items-center mb-3">
-                        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Vertical Slice (Z)</h3>
-                        <span class="px-2 py-1 bg-slate-900 text-blue-400 text-xs rounded border border-slate-700 font-mono" id="current-layer-badge">L: 0</span>
-                    </div>
-                    <input type="range" id="layer-slider" min="0" max="0" value="0" class="w-full mb-2">
-                    <div class="flex justify-between text-xs text-slate-400 font-mono mb-3">
-                        <span id="stat-z-height">Z: 0.00 mm</span>
-                        <span id="stat-layer-total">0 Layers</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <button id="btn-layer-prev" title="Previous Layer" class="flex-1 flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white py-1.5 rounded-lg transition text-xs font-semibold">
-                            <i data-lucide="chevron-down" class="w-3 h-3"></i> Prev
-                        </button>
-                        <button id="btn-layer-next" title="Next Layer" class="flex-1 flex items-center justify-center gap-1 bg-slate-700 hover:bg-slate-600 text-slate-300 hover:text-white py-1.5 rounded-lg transition text-xs font-semibold">
-                            Next <i data-lucide="chevron-up" class="w-3 h-3"></i>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- Nozzle Kinematic Player -->
-                <div class="p-4 bg-slate-800/80 border border-blue-900/50 rounded-xl shadow-inner relative overflow-hidden">
-                    <div class="absolute top-0 right-0 w-16 h-16 bg-blue-500/10 rounded-bl-full pointer-events-none"></div>
-                    <div class="flex justify-between items-center mb-2">
-                        <h3 class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                            <i data-lucide="crosshair" class="w-3 h-3 text-blue-400"></i> Nozzle Timeline
-                        </h3>
-                        <span id="stat-path-moves" class="text-slate-500 font-mono text-[10px]">0 / 0</span>
-                    </div>
-
-                    <input type="range" id="path-slider" min="0" max="0" value="0" class="w-full mb-3">
-
-                    <!-- Playback Controls Row -->
-                    <div class="flex items-center gap-2 mb-3">
-                        <button id="btn-rewind" title="Rewind to Start" class="flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition" style="width:2rem;height:2rem;min-width:2rem">
-                            <i data-lucide="skip-back" class="w-3 h-3"></i>
-                        </button>
-                        <button id="btn-play" class="flex-1 flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-lg transition font-semibold text-sm">
-                            <i data-lucide="play" class="w-4 h-4"></i> Play
-                        </button>
-                        <button id="btn-fast-forward" title="Jump to End" class="flex items-center justify-center bg-slate-700 hover:bg-slate-600 text-slate-300 rounded-lg transition" style="width:2rem;height:2rem;min-width:2rem">
-                            <i data-lucide="skip-forward" class="w-3 h-3"></i>
-                        </button>
-                    </div>
-
-                    <!-- Speed Control -->
-                    <div>
-                        <div class="flex justify-between text-xs text-slate-400 mb-1">
-                            <span>Playback Speed</span>
-                            <span id="speed-label" class="text-blue-400 font-mono font-bold">1&times;</span>
-                        </div>
-                        <input type="range" id="speed-slider" min="0" max="9" step="1" value="4" class="w-full">
-                        <div class="flex justify-between text-slate-500 mt-1 font-mono" style="font-size:9px">
-                            <span>1/16</span><span>⅛</span><span>¼</span><span>½</span><span>1×</span><span>2×</span><span>5×</span><span>10×</span><span>25×</span><span>50×</span>
-                        </div>
-                    </div>
-
-                    <!-- Live Velocity & Camera Tracking -->
-                    <div class="flex justify-between items-center mt-3 pt-3 border-t border-slate-700">
-                        <label class="flex items-center space-x-2 cursor-pointer">
-                            <input type="checkbox" id="toggle-follow" class="form-checkbox h-4 w-4 text-blue-500 rounded bg-slate-700 border-slate-600 focus:ring-blue-500 focus:ring-offset-slate-900">
-                            <span class="text-xs text-slate-400 flex items-center gap-1">
-                                <i data-lucide="navigation" class="w-3 h-3 text-blue-400"></i> Follow
-                            </span>
-                        </label>
-                        <div class="flex items-center gap-1 text-xs text-slate-400" title="Live Kinematic Velocity">
-                            <i data-lucide="gauge" class="w-3 h-3" id="icon-velocity"></i>
-                            <span id="stat-velocity" class="text-slate-400 font-mono font-bold w-16 text-right">0 mm/s</span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Visibility Toggles -->
-                <div class="space-y-3 pt-2">
-                    <label class="flex items-center space-x-3 cursor-pointer group">
-                        <input type="checkbox" id="toggle-history" checked class="form-checkbox h-4 w-4 text-blue-500 rounded bg-slate-700 border-slate-600 focus:ring-blue-500 focus:ring-offset-slate-900">
-                        <span class="text-sm text-slate-300 group-hover:text-white transition flex items-center gap-2">
-                            <div class="w-3 h-3 rounded-sm bg-blue-900/80 border border-blue-700"></div> Show Printed Object
-                        </span>
-                    </label>
-                    <label class="flex items-center space-x-3 cursor-pointer group">
-                        <input type="checkbox" id="toggle-travel" checked class="form-checkbox h-4 w-4 text-blue-500 rounded bg-slate-700 border-slate-600 focus:ring-blue-500 focus:ring-offset-slate-900">
-                        <span class="text-sm text-slate-300 group-hover:text-white transition flex items-center gap-2">
-                            <div class="w-3 h-3 rounded-sm bg-red-500/50 border border-red-500"></div> Show Travel Moves
-                        </span>
-                    </label>
-                </div>
-            </div>
-        </div>
+        <label class="relative flex items-center justify-center gap-2 py-2.5 px-4
+                       border border-dashed border-slate-600 rounded-xl cursor-pointer
+                       hover:bg-blue-500/10 hover:border-blue-500 transition-all text-sm
+                       font-medium text-slate-300 hover:text-blue-300">
+            <input type="file" id="file-input" accept=".gcode" class="hidden">
+            <i data-lucide="upload-cloud" class="w-4 h-4"></i>
+            <span>Browse or Drop G-code</span>
+        </label>
     </div>
 
-    <!-- 3D Canvas Area -->
-    <div class="flex-1 relative" id="canvas-container">
-        <!-- Center Target UI -->
-        <button id="btn-center" class="absolute bottom-6 right-6 bg-slate-800/80 hover:bg-slate-700 text-slate-300 p-3 rounded-xl border border-slate-600 shadow-lg backdrop-blur transition group hidden">
-            <i data-lucide="focus" class="w-5 h-5 group-hover:text-blue-400 transition"></i>
+    <div id="info-panel" class="glass rounded-2xl overflow-hidden hidden">
+        <div class="flex gap-1 p-2 flex-wrap" style="border-bottom:1px solid var(--border)">
+            <button class="tab-btn active" data-tab="stats">Stats</button>
+            <button class="tab-btn" data-tab="config">Config</button>
+            <button class="tab-btn" data-tab="filaments">Filaments</button>
+            <button class="tab-btn" data-tab="physics">Physics</button>
+        </div>
+
+        <!-- STATS TAB -->
+        <div class="tab-pane active p-3 flex flex-col gap-1 max-h-72 overflow-y-auto" id="tab-stats">
+            <div class="param-row"><span class="param-key">Print Time</span><span class="param-val hi" id="s-print-time">—</span></div>
+            <div class="param-row"><span class="param-key">Layers</span><span class="param-val" id="s-layers">—</span></div>
+            <div class="param-row"><span class="param-key">Total Moves</span><span class="param-val" id="s-moves">—</span></div>
+            <div class="param-row"><span class="param-key">Filament Used</span><span class="param-val" id="s-filament-len">—</span></div>
+            <div class="param-row"><span class="param-key">Weight</span><span class="param-val" id="s-weight">—</span></div>
+            <div class="param-row"><span class="param-key">Max Z Height</span><span class="param-val" id="s-maxz">—</span></div>
+            <div class="param-row"><span class="param-key">Slicer</span><span class="param-val" id="s-slicer">—</span></div>
+            <div class="param-row"><span class="param-key">Retractions</span><span class="param-val" id="s-retract-count">—</span></div>
+            <div class="param-row"><span class="param-key">Top Feature</span><span class="param-val" id="s-top-feature">—</span></div>
+        </div>
+
+        <!-- CONFIG TAB -->
+        <div class="tab-pane p-3 flex flex-col gap-0 max-h-72 overflow-y-auto" id="tab-config">
+            <div class="section-head">Speed (mm/s)</div>
+            <div class="param-row"><span class="param-key">Outer Wall</span><span class="param-val" id="c-outer-wall-speed">—</span></div>
+            <div class="param-row"><span class="param-key">Inner Wall</span><span class="param-val" id="c-inner-wall-speed">—</span></div>
+            <div class="param-row"><span class="param-key">Infill</span><span class="param-val" id="c-sparse-infill-speed">—</span></div>
+            <div class="param-row"><span class="param-key">Top Surface</span><span class="param-val" id="c-top-surface-speed">—</span></div>
+            <div class="param-row"><span class="param-key">Initial Layer</span><span class="param-val warn" id="c-initial-layer-speed">—</span></div>
+            <div class="param-row"><span class="param-key">Travel</span><span class="param-val" id="c-travel-speed">—</span></div>
+            <div class="section-head">Acceleration (mm/s²)</div>
+            <div class="param-row"><span class="param-key">Default</span><span class="param-val" id="c-default-accel">—</span></div>
+            <div class="param-row"><span class="param-key">Initial Layer</span><span class="param-val warn" id="c-initial-layer-accel">—</span></div>
+            <div class="param-row"><span class="param-key">Travel</span><span class="param-val" id="c-travel-accel">—</span></div>
+            <div class="section-head">Layer / Extrusion</div>
+            <div class="param-row"><span class="param-key">Layer Height</span><span class="param-val hi" id="c-layer-height">—</span></div>
+            <div class="param-row"><span class="param-key">Initial Layer H</span><span class="param-val" id="c-init-layer-h">—</span></div>
+            <div class="param-row"><span class="param-key">Line Width</span><span class="param-val" id="c-line-width">—</span></div>
+            <div class="param-row"><span class="param-key">Wall Loops</span><span class="param-val" id="c-wall-loops">—</span></div>
+            <div class="param-row"><span class="param-key">Infill Density</span><span class="param-val" id="c-infill-density">—</span></div>
+            <div class="param-row"><span class="param-key">Infill Pattern</span><span class="param-val" id="c-infill-pattern">—</span></div>
+            <div class="param-row"><span class="param-key">Top Shells</span><span class="param-val" id="c-top-shells">—</span></div>
+            <div class="param-row"><span class="param-key">Bottom Shells</span><span class="param-val" id="c-bot-shells">—</span></div>
+            <div class="section-head">Retraction</div>
+            <div class="param-row"><span class="param-key">Length</span><span class="param-val" id="c-retract-len">—</span></div>
+            <div class="param-row"><span class="param-key">Speed</span><span class="param-val" id="c-retract-speed">—</span></div>
+            <div class="param-row"><span class="param-key">De-retract Speed</span><span class="param-val" id="c-deretract-speed">—</span></div>
+            <div class="section-head">Support / Misc</div>
+            <div class="param-row"><span class="param-key">Support</span><span class="param-val" id="c-support">—</span></div>
+            <div class="param-row"><span class="param-key">Brim</span><span class="param-val" id="c-brim">—</span></div>
+            <div class="param-row"><span class="param-key">Arc Fitting</span><span class="param-val" id="c-arc">—</span></div>
+            <div class="param-row"><span class="param-key">Pressure Advance</span><span class="param-val" id="c-pa">—</span></div>
+        </div>
+
+        <!-- FILAMENTS TAB -->
+        <div class="tab-pane p-3 flex flex-col gap-2 max-h-72 overflow-y-auto" id="tab-filaments">
+            <div id="filament-list">
+                <p class="text-xs text-slate-500 text-center py-4">Load a file to see filaments</p>
+            </div>
+        </div>
+
+        <!-- PHYSICS TAB -->
+        <div class="tab-pane p-3 flex flex-col gap-0 max-h-72 overflow-y-auto" id="tab-physics">
+            <div class="section-head">Material Profile</div>
+            <div class="param-row"><span class="param-key">Filament Type</span><span class="param-val hi" id="p-filament-type">—</span></div>
+            <div class="param-row"><span class="param-key">Z Hop Height</span><span class="param-val" id="p-z-hop">—</span></div>
+            <div class="param-row"><span class="param-key">Speed Multiplier</span><span class="param-val" id="p-speed-mult">—</span></div>
+            <div class="param-row"><span class="param-key">Max Volumetric</span><span class="param-val" id="p-max-vol">—</span></div>
+            <div class="param-row"><span class="param-key">Max Travel Speed</span><span class="param-val" id="p-max-travel">—</span></div>
+            <div class="param-row"><span class="param-key">Uniform Speed</span><span class="param-val" id="p-uniform">—</span></div>
+            <div class="section-head">Kinematics H2C 450g (mm/s²)</div>
+            <div class="param-row"><span class="param-key">First Layer</span><span class="param-val warn">500</span></div>
+            <div class="param-row"><span class="param-key">Outer Wall</span><span class="param-val">2,000</span></div>
+            <div class="param-row"><span class="param-key">Inner Wall</span><span class="param-val">3,500</span></div>
+            <div class="param-row"><span class="param-key">Infill / Bridge</span><span class="param-val">5,000</span></div>
+            <div class="param-row"><span class="param-key">Small / Gap / Hole</span><span class="param-val">1,500</span></div>
+            <div class="param-row"><span class="param-key">Travel</span><span class="param-val hi">12,000</span></div>
+            <div class="param-row"><span class="param-key">Default</span><span class="param-val">3,000</span></div>
+            <div class="section-head">Thermal Thresholds</div>
+            <div class="param-row"><span class="param-key">Bonding (flow)</span><span class="param-val">&ge; 12.0 mm&sup3;/s &nbsp;+7&deg;C</span></div>
+            <div class="param-row"><span class="param-key">Bonding (path)</span><span class="param-val">&ge; 150.0 mm &nbsp;+7&deg;C</span></div>
+            <div class="param-row"><span class="param-key">Cooling (path)</span><span class="param-val">&le; 15.0 mm &nbsp;&minus;5&deg;C</span></div>
+            <div class="param-row"><span class="param-key">Cooling (flow)</span><span class="param-val">&le; 3.0 mm&sup3;/s &nbsp;&minus;5&deg;C</span></div>
+            <div class="section-head">AntiResonanceBrake</div>
+            <div class="param-row"><span class="param-key">Min Trigger Dist</span><span class="param-val">10.0 mm</span></div>
+            <div class="param-row"><span class="param-key">Min Trigger Speed</span><span class="param-val">100 mm/s</span></div>
+            <div class="param-row"><span class="param-key">Micro Lift</span><span class="param-val">0.15 mm</span></div>
+            <div class="param-row"><span class="param-key">Base Dwell</span><span class="param-val">15 ms</span></div>
+            <div class="param-row"><span class="param-key">Max Dwell</span><span class="param-val">50 ms</span></div>
+        </div>
+    </div>
+</div>
+
+<!-- TOP RIGHT — Toggles + Legend + Shortcuts -->
+<div class="fixed top-5 right-20 z-10 w-56 flex flex-col gap-3">
+    <div class="glass rounded-2xl p-4 flex flex-col gap-3">
+        <div class="section-head" style="padding-top:0">Visualization</div>
+        <label class="sw flex items-center justify-between gap-3 cursor-pointer">
+            <span class="text-xs text-slate-300">Show All Layers</span>
+            <input type="checkbox" id="toggle-all-layers" checked>
+            <div class="sw-track"><div class="sw-thumb"></div></div>
+        </label>
+        <label class="sw flex items-center justify-between gap-3 cursor-pointer">
+            <span class="text-xs text-slate-300">Show Travel Moves</span>
+            <input type="checkbox" id="toggle-travels" checked>
+            <div class="sw-track"><div class="sw-thumb"></div></div>
+        </label>
+        <div class="flex flex-col gap-1.5">
+            <span class="text-xs text-slate-400">Color Mode</span>
+            <div class="flex gap-1">
+                <button class="color-mode-btn active" data-mode="default">Default</button>
+                <button class="color-mode-btn" data-mode="speed">Speed</button>
+                <button class="color-mode-btn" data-mode="feature">Feature</button>
+            </div>
+        </div>
+        <label class="sw flex items-center justify-between gap-3 cursor-pointer">
+            <span class="text-xs text-slate-300">Track Nozzle</span>
+            <input type="checkbox" id="toggle-follow">
+            <div class="sw-track"><div class="sw-thumb"></div></div>
+        </label>
+        <button id="btn-theme" class="panel-btn mt-1">
+            <i data-lucide="moon" class="w-3.5 h-3.5"></i>
+            <span id="btn-theme-label">Dark Mode</span>
         </button>
-        
-        <!-- Velocity Legend -->
-        <div id="velocity-legend" class="absolute top-6 right-6 bg-slate-800/80 p-3 rounded-xl border border-slate-600 shadow-lg backdrop-blur hidden pointer-events-none">
-            <div class="text-[10px] font-bold text-slate-400 mb-2 uppercase tracking-wider text-center">Speed</div>
-            <div class="flex h-32 gap-2">
-                <div class="w-3 rounded bg-gradient-to-t from-blue-500 via-green-500 to-red-500"></div>
-                <div class="flex flex-col justify-between text-[10px] text-slate-300 font-mono">
-                    <span id="legend-max">0</span>
-                    <span id="legend-min">0</span>
-                </div>
-            </div>
-        </div>
-
-        <div id="three-canvas" class="w-full h-full"></div>
+        <button id="btn-plate-color" class="panel-btn">
+            <span id="btn-plate-swatch" style="width:12px;height:12px;border-radius:3px;background:#6b7280;border:1px solid rgba(255,255,255,.2);flex-shrink:0"></span>
+            <span id="btn-plate-label">Plate: Ash</span>
+        </button>
     </div>
+
+    <div id="speed-legend" class="glass rounded-2xl p-3 flex flex-col gap-2 hidden">
+        <div class="section-head" style="padding-top:0">Feedrate</div>
+        <div id="speed-legend-bar"></div>
+        <div class="flex justify-between text-[10px] font-mono text-slate-400">
+            <span id="legend-min">—</span><span class="text-slate-500">mm/s</span><span id="legend-max">—</span>
+        </div>
+    </div>
+    <div id="feature-legend" class="glass rounded-2xl p-3 flex flex-col gap-2 hidden">
+        <div class="section-head" style="padding-top:0">Feature Colors</div>
+        <div id="feature-legend-items" class="flex flex-col gap-1"></div>
+    </div>
+
+    <div class="glass rounded-2xl p-3 flex flex-col gap-1.5">
+        <div class="section-head" style="padding-top:0">Shortcuts</div>
+        <div class="flex justify-between items-center"><kbd>Space</kbd><span class="text-[10px] text-slate-400">Play / Pause</span></div>
+        <div class="flex justify-between items-center"><kbd>↑ ↓</kbd><span class="text-[10px] text-slate-400">Layer ±1</span></div>
+        <div class="flex justify-between items-center"><kbd>← →</kbd><span class="text-[10px] text-slate-400">Move ±10</span></div>
+        <div class="flex justify-between items-center"><kbd>Home</kbd><span class="text-[10px] text-slate-400">First layer</span></div>
+        <div class="flex justify-between items-center"><kbd>End</kbd><span class="text-[10px] text-slate-400">Last layer</span></div>
+        <div class="flex justify-between items-center"><kbd>R</kbd><span class="text-[10px] text-slate-400">Reset camera</span></div>
+    </div>
+</div>
+
+<!-- RIGHT — Vertical Layer Slider -->
+<div class="fixed right-5 top-5 bottom-5 z-10 glass rounded-2xl w-14 flex flex-col items-center py-4 px-2 pointer-events-auto gap-2">
+    <button id="btn-layer-up" class="icon-btn" title="Layer +1">
+        <i data-lucide="chevron-up" class="w-4 h-4"></i>
+    </button>
+    <span class="text-[9px] font-bold text-slate-500 tracking-widest">TOP</span>
+    <div class="flex-grow min-h-0 flex justify-center py-2 w-full" style="overflow:hidden">
+        <input type="range" id="layer-slider" min="0" max="0" value="0" class="vslider">
+    </div>
+    <span class="text-[9px] font-bold text-slate-500 tracking-widest">BOT</span>
+    <button id="btn-layer-down" class="icon-btn" title="Layer -1">
+        <i data-lucide="chevron-down" class="w-4 h-4"></i>
+    </button>
+    <div class="text-center border-t border-slate-700 w-full pt-2 mt-1">
+        <span class="text-[9px] text-slate-400 block">LAYER</span>
+        <span id="layer-label" class="text-base font-mono font-bold text-blue-400">0</span>
+        <span class="text-[9px] text-slate-500 block" id="layer-z-label">z=0.00</span>
+    </div>
+</div>
+
+<!-- BOTTOM — Playback + HUD -->
+<div class="fixed bottom-5 left-80 right-24 z-10 glass rounded-2xl p-4 flex flex-col gap-3 pointer-events-auto">
+    <div class="flex items-center gap-2 flex-wrap">
+        <div class="hud-pill"><div class="move-dot" id="hud-dot" style="background:#3b82f6"></div><span id="hud-type">—</span></div>
+        <div class="hud-pill"><div class="feat-dot" id="hud-feat-dot" style="background:#64748b"></div><span id="hud-feature">—</span></div>
+        <div class="hud-pill">F <span id="hud-f">—</span></div>
+        <div class="hud-pill">X<span id="hud-x">—</span> Y<span id="hud-y">—</span> Z<span id="hud-z">—</span></div>
+        <div class="hud-pill">Move <span id="hud-idx">—</span> / <span id="hud-total">—</span></div>
+    </div>
+
+    <div class="flex items-center gap-3">
+        <span class="text-[10px] font-mono text-slate-500 w-8 text-right" id="move-current">0</span>
+        <input type="range" id="progress-slider" min="0" max="0" value="0" class="flex-grow" style="height:6px">
+        <span class="text-[10px] font-mono text-slate-500 w-8" id="move-total">0</span>
+    </div>
+
+    <div class="flex items-center justify-between">
+        <div class="w-32"></div>
+        <div class="flex items-center gap-3">
+            <button id="btn-rewind" class="icon-btn" title="Rewind">
+                <i data-lucide="skip-back" class="w-4 h-4"></i>
+            </button>
+            <button id="btn-step-back" class="icon-btn" title="Step Back">
+                <i data-lucide="chevron-left" class="w-4 h-4"></i>
+            </button>
+            <button id="btn-play" class="p-3.5 bg-blue-600 hover:bg-blue-500 rounded-full text-white shadow-[0_0_18px_rgba(37,99,235,.6)] transition-all active:scale-95">
+                <i id="play-icon" data-lucide="play" class="w-5 h-5 ml-0.5"></i>
+            </button>
+            <button id="btn-step-fwd" class="icon-btn" title="Step Forward">
+                <i data-lucide="chevron-right" class="w-4 h-4"></i>
+            </button>
+            <button id="btn-fast-forward" class="icon-btn" title="End">
+                <i data-lucide="skip-forward" class="w-4 h-4"></i>
+            </button>
+        </div>
+        <div class="flex items-center gap-2 w-32 justify-end">
+            <i data-lucide="gauge" class="w-3.5 h-3.5 text-slate-500"></i>
+            <input type="range" id="speed-slider" min="0" max="5" value="2" class="w-20" style="height:5px">
+            <span id="speed-label" class="text-xs font-mono text-blue-400 w-8 font-bold text-right">1x</span>
+        </div>
+    </div>
+</div>
 
     <script>
         lucide.createIcons();
 
-        // ==========================================
-        // STATE
-        // ==========================================
-        let parsedData = { layers: [], bounds: null };
+        // --- THREE.JS GLOBALS ---
+        let scene, camera, renderer, controls;
+        let objectGroup = new THREE.Group();
+        let nozzleMesh, plateMesh, gridHelper;
+        let parsedData = { layers: [], config: {}, header: {} };
+        let gcOffsetX = 0, gcOffsetY = 0;
+
+        let globalMinF = Infinity;
+        let globalMaxF = -Infinity;
+
+        // --- STATE ---
         let currentLayerIndex = 0;
-        let currentPathIndex  = 0;
-        let isPlaying         = false;
-        let playAnimationId   = null;
-
-        const SPEED_STEPS  = [0.0625, 0.125, 0.25, 0.5, 1, 2, 5, 10, 25, 50];
-        const SPEED_LABELS = ['1/16\u00d7', '\u215b\u00d7', '\u00bc\u00d7', '\u00bd\u00d7', '1\u00d7', '2\u00d7', '5\u00d7', '10\u00d7', '25\u00d7', '50\u00d7'];
-        let playSpeed = 1;
+        let currentPathIndex = 0;
+        let isPlaying = false;
+        let playAnimationId = null;
         let playAccum = 0;
+        const SPEED_STEPS  = [0.05, 0.25, 1, 3, 8, 20];
+        const SPEED_LABELS = ['0.05x','0.25x','1x','3x','8x','20x'];
+        let playSpeed = SPEED_STEPS[2];
+        let colorMode = 'default';
 
-        // ==========================================
-        // THREE.JS GLOBALS
-        // ==========================================
-        let scene, camera, renderer, controls, nozzleMesh;
-        const objectGroup = new THREE.Group();
+        // --- DOM Elements ---
+        const layerSlider    = document.getElementById('layer-slider');
+        const progressSlider = document.getElementById('progress-slider');
+        const layerLabel     = document.getElementById('layer-label');
+        const layerZLabel    = document.getElementById('layer-z-label');
+        const moveCurrent    = document.getElementById('move-current');
+        const moveTotal      = document.getElementById('move-total');
+        const playIcon       = document.getElementById('play-icon');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        const loadingProgress= document.getElementById('loading-progress');
 
-        // Mesh cache — history is rebuilt only on layer change, not on every path step
-        let historyMesh          = null;
-        let historyBuiltForLayer = -1;
-        let curExtrudeMesh       = null;
-        let curTravelMesh        = null;
-
-        // DrawRange lookup tables: curExtrudeVertexAtMove[i+1] = cumulative vertex count
-        // after processing move[i], so setDrawRange(0, table[idx+1]) shows moves 0..idx.
-        let curExtrudeVertexAtMove = null;
-        let curTravelVertexAtMove  = null;
-
-        // UI refs
-        const fileInput     = document.getElementById('file-input');
-        const layerSlider   = document.getElementById('layer-slider');
-        const pathSlider    = document.getElementById('path-slider');
-        const btnPlay       = document.getElementById('btn-play');
-        const toggleHistory = document.getElementById('toggle-history');
-        const toggleTravel  = document.getElementById('toggle-travel');
-        const velocityLabel = document.getElementById('stat-velocity');
-
-        // ==========================================
-        // 1. THREE.JS SETUP
-        // ==========================================
         function initThreeJS() {
-            const container = document.getElementById('three-canvas');
-
+            const container = document.getElementById('canvas-container');
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x020617);
-            THREE.Object3D.DefaultUp.set(0, 0, 1); // Z-up for 3D printing
+            scene.fog = new THREE.FogExp2(0xd0d8e8, 0.003);
 
-            camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 2000);
-            camera.position.set(0, -300, 200);
+            const plateSize = 256;
+            const gridHelper = new THREE.GridHelper(plateSize, 26, 0x1e293b, 0x111827);
+            gridHelper.position.set(plateSize/2, 0.01, -plateSize/2);
+            scene.add(gridHelper);
 
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(container.clientWidth, container.clientHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
+            plateMesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(plateSize, plateSize),
+                new THREE.MeshBasicMaterial({ color: 0x020617, transparent: true, opacity: 0.85, depthWrite: false })
+            );
+            plateMesh.rotation.x = -Math.PI / 2;
+            plateMesh.position.set(plateSize/2, 0, -plateSize/2);
+            scene.add(plateMesh);
+
+            const edges = new THREE.EdgesGeometry(new THREE.BoxGeometry(plateSize, 256, plateSize));
+            const vol = new THREE.LineSegments(edges,
+                new THREE.LineBasicMaterial({ color: 0x1e293b, opacity: 0.35, transparent: true }));
+            vol.position.set(plateSize/2, 128, -plateSize/2);
+            scene.add(vol);
+
+            camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.5, 5000);
+            camera.position.set(-60, 200, 220);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setSize(innerWidth, innerHeight);
+            renderer.setPixelRatio(devicePixelRatio);
             container.appendChild(renderer.domElement);
 
             controls = new THREE.OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
-            controls.dampingFactor = 0.05;
-            controls.maxPolarAngle = Math.PI / 2 + 0.1;
+            controls.dampingFactor = 0.08;
+            controls.target.set(128, 20, -128);
 
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-            const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-            dir.position.set(100, 100, 300);
-            scene.add(dir);
-
-            const bedGrid = new THREE.GridHelper(300, 30, 0x475569, 0x1e293b);
-            bedGrid.rotation.x = Math.PI / 2;
-            scene.add(bedGrid);
-            scene.add(new THREE.AxesHelper(50));
-
-            // Upside-down cone nozzle: tip at local origin (0,0,0), base floats above
-            const coneH = 14;
-            const nozzleGeo = new THREE.ConeGeometry(5, coneH, 16);
-            nozzleGeo.translate(0, -coneH / 2, 0); // shift so apex = origin
-            nozzleMesh = new THREE.Mesh(nozzleGeo, new THREE.MeshStandardMaterial({
-                color: 0xff6000, emissive: 0xff2200, emissiveIntensity: 0.45,
-                metalness: 0.2, roughness: 0.5, transparent: true, opacity: 0.92
-            }));
-            nozzleMesh.rotation.x = -Math.PI / 2; // tip points -Z (toward bed)
-            nozzleMesh.visible = false;
-            // Glowing tip sphere at apex
-            nozzleMesh.add(new THREE.Mesh(
-                new THREE.SphereGeometry(2, 10, 10),
-                new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xff8800, emissiveIntensity: 1.2 })
-            ));
-            scene.add(nozzleMesh);
             scene.add(objectGroup);
 
+            // Tip-down cone: apex points at the path line, base floats above.
+            // Default ConeGeometry: apex at +Y/2, base at -Y/2.
+            // Rotate 180° → apex at -Y/2 (pointing down).
+            // Translate +height/2 → apex lands exactly at Y=0 (path), base at +height.
+            const nozzleGeo = new THREE.ConeGeometry(1.8, 4.5, 16);
+            nozzleGeo.applyMatrix4(new THREE.Matrix4().makeRotationX(Math.PI));
+            nozzleGeo.translate(0, 2.25, 0);
+            nozzleMesh = new THREE.Mesh(
+                nozzleGeo,
+                new THREE.MeshBasicMaterial({ color: 0xef4444 })
+            );
+            nozzleMesh.visible = false;
+            objectGroup.add(nozzleMesh);
+
             window.addEventListener('resize', () => {
-                camera.aspect = container.clientWidth / container.clientHeight;
+                camera.aspect = innerWidth / innerHeight;
                 camera.updateProjectionMatrix();
-                renderer.setSize(container.clientWidth, container.clientHeight);
+                renderer.setSize(innerWidth, innerHeight);
             });
 
-            // Render loop
             (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
         }
 
-        // ==========================================
-        // 2. G-CODE PARSER
-        // ==========================================
-        function parseGCode(text) {
-            const layers = [];
-            let currentLayerMoves = [];
-            let x = 0, y = 0, z = 0, e = 0, f = 0;
-            let isAbs = true, isAbsE = true;
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-            let minV = Infinity, maxV = -Infinity;
+        // --- DRAG & DROP ---
+        ['dragenter','dragover','dragleave','drop'].forEach(e =>
+            document.addEventListener(e, ev => { ev.preventDefault(); ev.stopPropagation(); })
+        );
+        ['dragenter','dragover'].forEach(e => document.addEventListener(e, () => document.body.classList.add('dragover')));
+        ['dragleave','drop'].forEach(e => document.addEventListener(e, () => document.body.classList.remove('dragover')));
 
-            const lines = text.split('\n');
-            let currentLayerZ = -1;
+        document.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+        document.getElementById('file-input').addEventListener('change', e => handleFile(e.target.files[0]));
+
+        function handleFile(file) {
+            if (!file || !file.name.endsWith('.gcode')) { alert('Please drop a .gcode file.'); return; }
+            document.getElementById('file-name-display').textContent = file.name;
+            loadingOverlay.classList.remove('hidden');
+            setTimeout(() => {
+                const reader = new FileReader();
+                reader.onload = ev => parseGCode(ev.target.result);
+                reader.readAsText(file);
+            }, 40);
+        }
+
+        // --- G-CODE PARSING ---
+        function parseGCode(gcode) {
+            parsedData = { layers: [], config: {}, header: {}, retractCount: 0, featureCounts: {} };
+            globalMinF = Infinity; globalMaxF = -Infinity;
+            const lines = gcode.split('\n');
+            let inHeader = false, inConfig = false;
+
+            // Pass 1: parse comment headers/config
+            for (let i = 0; i < lines.length; i++) {
+                const raw = lines[i].trim();
+                if (raw === '; HEADER_BLOCK_START') { inHeader = true; continue; }
+                if (raw === '; HEADER_BLOCK_END')   { inHeader = false; continue; }
+                if (raw === '; CONFIG_BLOCK_START') { inConfig = true; continue; }
+                if (raw === '; CONFIG_BLOCK_END')   { inConfig = false; continue; }
+                if (raw.startsWith(';')) {
+                    const content = raw.slice(1).trim();
+                    // "key: value" header style
+                    const hm = content.match(/^(.+?):\s*(.+)$/);
+                    if (hm) parsedData.header[hm[1].trim().toLowerCase()] = hm[2].trim();
+                    // "; key = value" config style
+                    const cm = content.match(/^([a-z0-9_]+)\s*=\s*(.+)$/i);
+                    if (cm) parsedData.config[cm[1].toLowerCase()] = cm[2].trim();
+                }
+                if (i > 400 && !inConfig && !inHeader && !raw.startsWith(';')) break;
+            }
+
+            // Pass 2: geometry
+            let currentLayer = { z: 0, moves: [] };
+            let x=0, y=0, z=0, e=0, f=3000, absPos=true, absE=false, lastEZ=-999;
+            let currentFeature = 'unknown';
 
             for (let i = 0; i < lines.length; i++) {
-                const cleanLine = lines[i].split(';')[0].trim().toUpperCase();
-                if (!cleanLine) continue;
-
-                if (cleanLine === 'G90') { isAbs  = true;  continue; }
-                if (cleanLine === 'G91') { isAbs  = false; continue; }
-                if (cleanLine === 'M82') { isAbsE = true;  continue; }
-                if (cleanLine === 'M83') { isAbsE = false; continue; }
-
-                if (cleanLine.startsWith('G92')) {
-                    const m = cleanLine.match(/E([-+]?\d*\.?\d+)/);
-                    if (m) e = parseFloat(m[1]);
+                const raw2 = lines[i].trim();
+                if (raw2.startsWith(';')) {
+                    const fm = raw2.match(/;\s*(?:FEATURE|TYPE)\s*:?\s*(.+)/i);
+                    if (fm) currentFeature = fm[1].trim().toLowerCase();
                     continue;
                 }
-
-                // Only process G0/G1/G2/G3
-                if (!cleanLine.startsWith('G0') && !cleanLine.startsWith('G1') &&
-                    !cleanLine.startsWith('G2') && !cleanLine.startsWith('G3')) continue;
-
-                // Parse parameters with a single regex pass (faster than split)
-                const params = {};
-                const re = /([A-Z])([-+]?\d*\.?\d+)/g;
-                let pm;
-                while ((pm = re.exec(cleanLine)) !== null) params[pm[1]] = parseFloat(pm[2]);
-
-                if (params.F !== undefined) f = params.F;
-
-                const nx = params.X !== undefined ? (isAbs  ? params.X : x + params.X) : x;
-                const ny = params.Y !== undefined ? (isAbs  ? params.Y : y + params.Y) : y;
-                const nz = params.Z !== undefined ? (isAbs  ? params.Z : z + params.Z) : z;
-
-                let actual_e = 0;
-                if (params.E !== undefined) {
-                    actual_e = isAbsE ? (params.E - e) : params.E;
-                    e = isAbsE ? params.E : e + params.E;
+                const line = raw2.split(';')[0].trim().toUpperCase();
+                if (!line) continue;
+                const tok = line.split(/\s+/), cmd = tok[0];
+                if (cmd==='G90') { absPos=true; continue; }
+                if (cmd==='G91') { absPos=false; continue; }
+                if (cmd==='M82') { absE=true; continue; }
+                if (cmd==='M83') { absE=false; continue; }
+                if (cmd==='G92') {
+                    tok.forEach(t => {
+                        const v=parseFloat(t.slice(1)); if(isNaN(v))return;
+                        if(t[0]==='E')e=v; if(t[0]==='X')x=v;
+                        if(t[0]==='Y')y=v; if(t[0]==='Z')z=v;
+                    }); continue;
                 }
+                if (cmd==='G0'||cmd==='G1'||cmd==='G2'||cmd==='G3') {
+                    let nx=x,ny=y,nz=z,ne=e,nf=f,eDelta=0,hasE=false;
+                    let i_arc=0, j_arc=0, hasArc=false; // [!] NEW ARC VARIABLES
 
-                const isExtrude = actual_e > 0.0001;
-
-                // Layer detection: a new extrusion Z that differs meaningfully = new layer
-                if (isExtrude && nz > 0 && Math.abs(nz - currentLayerZ) > 0.001) {
-                    if (currentLayerZ < 0) {
-                        currentLayerZ = nz;
-                    } else if (Math.abs(nz - currentLayerZ) > 0.05) {
-                        if (currentLayerMoves.length > 0) {
-                            layers.push({ z: currentLayerZ, moves: currentLayerMoves });
-                            currentLayerMoves = [];
-                        }
-                        currentLayerZ = nz;
-                    }
-                }
-
-                const dist = Math.hypot(nx - x, ny - y);
-                if (dist > 0.001 || Math.abs(nz - z) > 0.001) {
-                    currentLayerMoves.push({
-                        type: isExtrude ? 'extrude' : 'travel',
-                        x1: x, y1: y, z1: z, x2: nx, y2: ny, z2: nz, velocity: f
+                    tok.forEach(t => {
+                        const v=parseFloat(t.slice(1)); if(isNaN(v))return;
+                        if(t[0]==='X')nx=absPos?v:x+v;
+                        if(t[0]==='Y')ny=absPos?v:y+v;
+                        if(t[0]==='Z')nz=absPos?v:z+v;
+                        if(t[0]==='I'){ i_arc=v; hasArc=true; } // [!] NEW
+                        if(t[0]==='J'){ j_arc=v; hasArc=true; } // [!] NEW
+                        if(t[0]==='F')nf=v;
+                        if(t[0]==='E'){ hasE=true; if(absE){eDelta=v-e;ne=v;}else{eDelta=v;ne=e+v;} }
                     });
-                    if (isExtrude) {
-                        if (nx < minX) minX = nx; if (x < minX) minX = x;
-                        if (nx > maxX) maxX = nx; if (x > maxX) maxX = x;
-                        if (ny < minY) minY = ny; if (y < minY) minY = y;
-                        if (ny > maxY) maxY = ny; if (y > maxY) maxY = y;
-                        if (f > 0) { if (f < minV) minV = f; if (f > maxV) maxV = f; }
+                    f=nf;
+                    const isEx=hasE&&eDelta>0, isRet=hasE&&eDelta<0;
+                    if(isEx){globalMinF=Math.min(globalMinF,f);globalMaxF=Math.max(globalMaxF,f);}
+                    if(isEx&&Math.abs(nz-lastEZ)>0.01){
+                        if(currentLayer.moves.length)parsedData.layers.push(currentLayer);
+                        currentLayer={z:nz,moves:[]}; lastEZ=nz;
                     }
-                }
-                x = nx; y = ny; z = nz;
-            }
+                    
+                    const mtype=isEx?'extrude':'travel';
 
-            if (currentLayerMoves.length > 0 && currentLayerZ >= 0)
-                layers.push({ z: currentLayerZ, moves: currentLayerMoves });
+                    // --- [!] CRITICAL FIX: ARC INTERPOLATOR ---
+                    if ((cmd === 'G2' || cmd === 'G3') && hasArc) {
+                        const cx = x + i_arc;
+                        const cy = y + j_arc;
+                        let startAngle = Math.atan2(y - cy, x - cx);
+                        let endAngle = Math.atan2(ny - cy, nx - cx);
 
-            if (minV === Infinity)  minV = 0;
-            if (maxV === -Infinity) maxV = 1;
+                        if (cmd === 'G2' && endAngle > startAngle) endAngle -= Math.PI * 2;
+                        if (cmd === 'G3' && endAngle < startAngle) endAngle += Math.PI * 2;
 
-            return { layers, bounds: { minX, maxX, minY, maxY, minV, maxV } };
-        }
+                        const radius = Math.hypot(i_arc, j_arc);
+                        const arcLen = radius * Math.abs(endAngle - startAngle);
+                        
+                        // Break arc into visual segments
+                        const segments = Math.max(6, Math.min(64, Math.ceil(arcLen)));
 
-        // ==========================================
-        // 3. COLOR UTILITY — no THREE.Color allocation, inline HSL→RGB
-        // ==========================================
-        // Maps velocity to [r,g,b] floats: slow=blue, fast=red
-        function velocityToRGB(v, minV, maxV) {
-            if (maxV === minV) return [0.231, 0.510, 0.965];
-            const t  = Math.max(0, Math.min(1, (v - minV) / (maxV - minV)));
-            const h6 = (1.0 - t) * 0.66 * 6; // hue in [0, 3.96]
-            const x  = 1 - Math.abs(h6 % 2 - 1);
-            if (h6 < 1) return [1, x, 0];
-            if (h6 < 2) return [x, 1, 0];
-            if (h6 < 3) return [0, 1, x];
-            return [0, x, 1]; // blue end
-        }
+                        let lx = x, ly = y, lz = z;
+                        for (let s = 1; s <= segments; s++) {
+                            const t = s / segments;
+                            const angle = startAngle + (endAngle - startAngle) * t;
+                            const px = cx + radius * Math.cos(angle);
+                            const py = cy + radius * Math.sin(angle);
+                            const pz = z + (nz - z) * t;
 
-        // ==========================================
-        // 4. GEOMETRY MANAGEMENT
-        // ==========================================
-        function disposeMesh(mesh) {
-            if (!mesh) return;
-            if (mesh.geometry) mesh.geometry.dispose();
-            if (mesh.material)  mesh.material.dispose();
-        }
-
-        // Called on layer change: (re)build history mesh and pre-allocate
-        // the full current-layer geometry. Path progress uses drawRange — O(1).
-        function rebuildForLayer() {
-            // --- History (cached; only rebuild when layer index changes) ---
-            if (historyBuiltForLayer !== currentLayerIndex) {
-                if (historyMesh) { objectGroup.remove(historyMesh); disposeMesh(historyMesh); historyMesh = null; }
-
-                if (toggleHistory.checked && currentLayerIndex > 0) {
-                    let total = 0;
-                    for (let i = 0; i < currentLayerIndex; i++)
-                        for (const m of parsedData.layers[i].moves)
-                            if (m.type === 'extrude') total++;
-
-                    const pos = new Float32Array(total * 6);
-                    const col = new Float32Array(total * 6);
-                    const { minV, maxV } = parsedData.bounds;
-                    let idx = 0;
-                    for (let i = 0; i < currentLayerIndex; i++) {
-                        for (const m of parsedData.layers[i].moves) {
-                            if (m.type !== 'extrude') continue;
-                            pos.set([m.x1, m.y1, m.z1, m.x2, m.y2, m.z2], idx * 6);
-                            const [r, g, b] = velocityToRGB(m.velocity, minV, maxV);
-                            col.set([r, g, b, r, g, b], idx * 6);
-                            idx++;
+                            currentLayer.moves.push({type:mtype,x1:lx,y1:ly,z1:lz,x2:px,y2:py,z2:pz,f,feature:currentFeature});
+                            lx = px; ly = py; lz = pz;
+                        }
+                        if(isEx){ parsedData.featureCounts[currentFeature]=(parsedData.featureCounts[currentFeature]||0)+1; }
+                    } else {
+                        // Standard straight line
+                        const hasXY=(nx!==x||ny!==y), hasZ=Math.abs(nz-z)>0.001;
+                        if(hasXY||hasZ){
+                            currentLayer.moves.push({type:mtype,x1:x,y1:y,z1:z,x2:nx,y2:ny,z2:nz,f,feature:currentFeature});
+                            if(isEx){ parsedData.featureCounts[currentFeature]=(parsedData.featureCounts[currentFeature]||0)+1; }
                         }
                     }
-                    const geo = new THREE.BufferGeometry();
-                    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-                    geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
-                    historyMesh = new THREE.LineSegments(geo,
-                        new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.15 }));
-                    objectGroup.add(historyMesh);
+
+                    if(isRet){ parsedData.retractCount++; }
+                    x=nx;y=ny;z=nz;e=ne;
                 }
-                historyBuiltForLayer = currentLayerIndex;
             }
+            if(currentLayer.moves.length)parsedData.layers.push(currentLayer);
 
-            // --- Current layer: allocate full typed arrays, build drawRange tables ---
-            if (curExtrudeMesh) { objectGroup.remove(curExtrudeMesh); disposeMesh(curExtrudeMesh); curExtrudeMesh = null; }
-            if (curTravelMesh)  { objectGroup.remove(curTravelMesh);  disposeMesh(curTravelMesh);  curTravelMesh  = null; }
+            centerGeometry();
+            populateUI();
+            const n = parsedData.layers.length;
+            if (n > 0) { layerSlider.max=n-1; layerSlider.value=n-1; setLayer(n-1); }
+            loadingOverlay.classList.add('hidden');
+        }
 
-            const moves = parsedData.layers[currentLayerIndex].moves;
-            const { minV, maxV } = parsedData.bounds;
-
-            let nE = 0, nT = 0;
-            for (const m of moves) { if (m.type === 'extrude') nE++; else nT++; }
-
-            const ePos = new Float32Array(nE * 6);
-            const eCol = new Float32Array(nE * 6);
-            const tPos = new Float32Array(nT * 6);
-
-            // +1 so index 0 = "0 vertices shown" (before any move)
-            curExtrudeVertexAtMove = new Int32Array(moves.length + 1);
-            curTravelVertexAtMove  = new Int32Array(moves.length + 1);
-
-            let ei = 0, ti = 0;
-            for (let i = 0; i < moves.length; i++) {
-                const m = moves[i];
-                if (m.type === 'extrude') {
-                    ePos.set([m.x1, m.y1, m.z1, m.x2, m.y2, m.z2], ei * 6);
-                    const [r, g, b] = velocityToRGB(m.velocity, minV, maxV);
-                    eCol.set([r, g, b, r, g, b], ei * 6);
-                    ei++;
-                } else {
-                    tPos.set([m.x1, m.y1, m.z1, m.x2, m.y2, m.z2], ti * 6);
-                    ti++;
+        function centerGeometry() {
+            let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+            const s = parsedData.layers.length>1 ? parsedData.layers.slice(1) : parsedData.layers;
+            s.forEach(l=>l.moves.forEach(m=>{
+                if(m.type==='extrude'){
+                    minX=Math.min(minX,m.x1,m.x2);maxX=Math.max(maxX,m.x1,m.x2);
+                    minY=Math.min(minY,m.y1,m.y2);maxY=Math.max(maxY,m.y1,m.y2);
                 }
-                curExtrudeVertexAtMove[i + 1] = ei * 2; // 2 vertices per segment
-                curTravelVertexAtMove [i + 1] = ti * 2;
-            }
-
-            if (nE > 0) {
-                const geo = new THREE.BufferGeometry();
-                geo.setAttribute('position', new THREE.BufferAttribute(ePos, 3));
-                geo.setAttribute('color',    new THREE.BufferAttribute(eCol, 3));
-                curExtrudeMesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true }));
-                objectGroup.add(curExtrudeMesh);
-            }
-            if (nT > 0) {
-                const geo = new THREE.BufferGeometry();
-                geo.setAttribute('position', new THREE.BufferAttribute(tPos, 3));
-                curTravelMesh = new THREE.LineSegments(geo,
-                    new THREE.LineBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.6 }));
-                curTravelMesh.visible = toggleTravel.checked;
-                objectGroup.add(curTravelMesh);
-            }
+            }));
+            if(!isFinite(minX)){minX=0;maxX=256;minY=0;maxY=256;}
+            gcOffsetX = minX; gcOffsetY = minY;
+            parsedData.layers.forEach(l=>l.moves.forEach(m=>{
+                m.x1-=gcOffsetX; m.x2-=gcOffsetX;
+                const oy1=m.y1,oy2=m.y2;
+                m.y1=m.z1; m.y2=m.z2;
+                m.z1=-(oy1-gcOffsetY); m.z2=-(oy2-gcOffsetY);
+            }));
         }
 
-        // O(1): only updates drawRange + nozzle position + UI labels — no geometry rebuild
-        function updatePathView() {
-            if (!curExtrudeVertexAtMove) return;
-            const moves = parsedData.layers[currentLayerIndex].moves;
-            const idx   = Math.min(currentPathIndex, moves.length - 1);
+        // --- POPULATE PARAM PANELS ---
+        function setText(id,val){ const e=document.getElementById(id); if(e)e.textContent=val??'—'; }
+        function fmtVal(raw,unit){
+            if(!raw)return'—';
+            const first=String(raw).split(',')[0].trim().replace(/^nil$/,'');
+            if(!first)return'—';
+            const n=parseFloat(first);
+            return isNaN(n)?first:`${n} ${unit}`;
+        }
 
-            if (curExtrudeMesh) curExtrudeMesh.geometry.setDrawRange(0, curExtrudeVertexAtMove[idx + 1]);
-            if (curTravelMesh)  {
-                curTravelMesh.geometry.setDrawRange(0, curTravelVertexAtMove[idx + 1]);
-                curTravelMesh.visible = toggleTravel.checked;
+        function populateUI() {
+            const cfg=parsedData.config, hdr=parsedData.header;
+            const totalMoves=parsedData.layers.reduce((a,l)=>a+l.moves.length,0);
+
+            // Stats
+            setText('s-print-time', hdr['model printing time']||hdr['total estimated time']||cfg['model_printing_time']||'—');
+            setText('s-layers',     parsedData.layers.length);
+            setText('s-moves',      totalMoves.toLocaleString());
+            setText('s-filament-len', fmtVal(cfg['total filament length [mm]']||cfg['filament_length'],'mm'));
+            setText('s-weight',     fmtVal(cfg['total filament weight [g]']||cfg['filament_weight'],'g'));
+            setText('s-maxz',       fmtVal(cfg['max_z_height'],'mm'));
+            // Slicer from raw header line "; BambuStudio 02.06…"
+            const slicerLine = Object.keys(hdr).find(k => k.includes('bambu'));
+            setText('s-slicer', slicerLine ? 'BambuStudio '+hdr[slicerLine] : 'BambuStudio');
+            setText('s-retract-count', (parsedData.retractCount||0).toLocaleString());
+            const fc2=parsedData.featureCounts||{};
+            const topFeat=Object.entries(fc2).sort((a,b)=>b[1]-a[1])[0];
+            setText('s-top-feature', topFeat?topFeat[0]:'—');
+
+            // Speed
+            setText('c-outer-wall-speed',    fmtVal(cfg['outer_wall_speed'],'mm/s'));
+            setText('c-inner-wall-speed',    fmtVal(cfg['inner_wall_speed'],'mm/s'));
+            setText('c-sparse-infill-speed', fmtVal(cfg['sparse_infill_speed']||cfg['infill_speed'],'mm/s'));
+            setText('c-top-surface-speed',   fmtVal(cfg['top_surface_speed'],'mm/s'));
+            setText('c-initial-layer-speed', fmtVal(cfg['initial_layer_speed'],'mm/s'));
+            setText('c-travel-speed',        fmtVal(cfg['travel_speed'],'mm/s'));
+            // Accel
+            setText('c-default-accel',       fmtVal(cfg['default_acceleration'],'mm/s²'));
+            setText('c-initial-layer-accel', fmtVal(cfg['initial_layer_acceleration'],'mm/s²'));
+            setText('c-travel-accel',        fmtVal(cfg['initial_layer_travel_acceleration']||cfg['travel_acceleration'],'mm/s²'));
+            // Layer
+            setText('c-layer-height',   fmtVal(cfg['layer_height'],'mm'));
+            setText('c-init-layer-h',   fmtVal(cfg['initial_layer_print_height'],'mm'));
+            setText('c-line-width',     fmtVal(cfg['line_width'],'mm'));
+            setText('c-wall-loops',     cfg['wall_loops']||'—');
+            setText('c-infill-density', cfg['sparse_infill_density']||cfg['infill_density']||'—');
+            setText('c-infill-pattern', cfg['sparse_infill_pattern']||cfg['infill_pattern']||'—');
+            setText('c-top-shells',     cfg['top_shell_layers']||'—');
+            setText('c-bot-shells',     cfg['bottom_shell_layers']||'—');
+            // Retraction
+            setText('c-retract-len',     fmtVal(cfg['filament_retraction_length']||cfg['retraction_length'],'mm'));
+            setText('c-retract-speed',   fmtVal(cfg['filament_retraction_speed']||cfg['retraction_speed'],'mm/s'));
+            setText('c-deretract-speed', fmtVal(cfg['deretraction_speed'],'mm/s'));
+            // Misc
+            setText('c-support', cfg['enable_support']==='1'?'✔ Enabled':cfg['enable_support']==='0'?'✗ Off':'—');
+            setText('c-brim',    cfg['brim_type']||'—');
+            setText('c-arc',     cfg['enable_arc_fitting']==='1'?'✔ On':cfg['enable_arc_fitting']==='0'?'✗ Off':'—');
+            const pa=cfg['enable_pressure_advance'];
+            setText('c-pa', pa?(pa.split(',')[0]==='1'?'✔ On':'✗ Off'):'—');
+
+            // Filaments
+            buildFilamentPanel(cfg);
+            populatePhysicsTab(cfg);
+
+            // Speed legend
+            if(isFinite(globalMinF)&&globalMaxF>globalMinF){
+                document.getElementById('legend-min').textContent=(globalMinF/60).toFixed(1);
+                document.getElementById('legend-max').textContent=(globalMaxF/60).toFixed(1);
             }
-
-            // Nozzle: world position = gcode coords + objectGroup offset
-            const m = moves[idx];
-            nozzleMesh.position.set(
-                m.x2 + objectGroup.position.x,
-                m.y2 + objectGroup.position.y,
-                m.z2
-            );
-            nozzleMesh.visible = true;
-
-            // Live readouts
-            velocityLabel.textContent = `${Math.round(m.velocity / 60)} mm/s`;
-            document.getElementById('stat-path-moves').textContent = `${idx} / ${moves.length - 1}`;
+            document.getElementById('info-panel').classList.remove('hidden');
         }
 
-        // ==========================================
-        // 5. FILE LOAD & DATA INIT
-        // ==========================================
-        fileInput.addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            document.getElementById('file-label').textContent = file.name;
-            document.getElementById('loading-indicator').classList.remove('hidden');
-            document.getElementById('stats-panel').classList.add('hidden');
-            document.getElementById('btn-center').classList.add('hidden');
-            document.getElementById('velocity-legend').classList.add('hidden');
-
-            const reader = new FileReader();
-            reader.onload = function(evt) {
-                setTimeout(() => {
-                    parsedData = parseGCode(evt.target.result);
-                    document.getElementById('loading-indicator').classList.add('hidden');
-                    if (parsedData.layers.length > 0) {
-                        initDataViewer();
-                    } else {
-                        alert('No printable layers found in this file.');
-                    }
-                }, 50);
-            };
-            reader.readAsText(file);
-        });
-
-        function initDataViewer() {
-            document.getElementById('stats-panel').classList.remove('hidden');
-            document.getElementById('btn-center').classList.remove('hidden');
-            document.getElementById('velocity-legend').classList.remove('hidden');
-            document.getElementById('stat-layer-total').textContent = `${parsedData.layers.length} Layers`;
-            document.getElementById('legend-max').textContent = `${Math.round(parsedData.bounds.maxV / 60)} mm/s`;
-            document.getElementById('legend-min').textContent = `${Math.round(parsedData.bounds.minV / 60)} mm/s`;
-
-            layerSlider.max   = parsedData.layers.length - 1;
-            layerSlider.value = 0;
-
-            const { minX, maxX, minY, maxY } = parsedData.bounds;
-            objectGroup.position.set(-(maxX + minX) / 2, -(maxY + minY) / 2, 0);
-
-            historyBuiltForLayer = -1; // invalidate cache for new file
-            nozzleMesh.visible   = false;
-
-            centerCamera();
-            setLayer(0);
+        function buildFilamentPanel(cfg) {
+            const list=document.getElementById('filament-list');
+            list.innerHTML='';
+            const types  =(cfg['filament_type']  ||'').split(';').map(s=>s.trim()).filter(Boolean);
+            const colours=(cfg['filament_colour']||'').split(';').map(s=>s.trim()).filter(Boolean);
+            const vendors=(cfg['filament_vendor']||'').split(';').map(s=>s.trim().replace(/"/g,'')).filter(Boolean);
+            const maxvol =(cfg['filament_max_volumetric_speed']||'').split(',').map(s=>s.trim());
+            if(!types.length){list.innerHTML='<p class="text-xs text-slate-500 text-center py-4">No filament data</p>';return;}
+            types.forEach((type,i)=>{
+                const col=colours[i]||'#888'; const vendor=vendors[i]||''; const vol=maxvol[i]?`${maxvol[i]} mm³/s`:'';
+                const div=document.createElement('div');
+                div.className='flex items-center gap-2 p-2 bg-slate-800/50 rounded-lg';
+                div.innerHTML=`<div class="swatch" style="background:${col}"></div>
+                    <div class="flex-grow min-w-0">
+                        <p class="text-xs font-semibold text-slate-200">${type}</p>
+                        <p class="text-[10px] text-slate-500 truncate">${vendor}</p>
+                    </div>${vol?`<span class="text-[10px] font-mono text-slate-400 flex-shrink-0">${vol}</span>`:''}`;
+                list.appendChild(div);
+            });
         }
 
-        function centerCamera() {
-            controls.target.set(0, 0, 0);
-            camera.position.set(0, -150, 150);
-            controls.update();
+        function getMaterialProfile(type) {
+            const t=(type||'').toLowerCase();
+            if(t.includes('tpu')||t.includes('tpe'))       return {z_hop:0.8,speed_mult:0.5, max_vol:3.2, max_travel:50,  uniform:false, label:'TPU/TPE'};
+            if(t.includes('petg'))                         return {z_hop:0.6,speed_mult:0.9, max_vol:10.0,max_travel:200, uniform:true,  label:'PETG'};
+            if(t.includes('pa')||t.includes('nylon'))      return {z_hop:0.6,speed_mult:0.9, max_vol:10.0,max_travel:200, uniform:true,  label:'PA/Nylon'};
+            if(t.includes('-cf')||t.includes(' cf')||
+               t.includes('-gf')||t.includes(' gf'))       return {z_hop:0.2,speed_mult:0.8, max_vol:8.0, max_travel:300, uniform:false, label:'CF/GF'};
+            if(t.includes('abs')||t.includes('asa'))       return {z_hop:0.3,speed_mult:0.95,max_vol:18.0,max_travel:400, uniform:false, label:'ABS/ASA'};
+            return                                                {z_hop:0.4,speed_mult:1.0, max_vol:15.0,max_travel:500, uniform:false, label:'PLA'};
         }
 
-        function setLayer(index) {
+        function populatePhysicsTab(cfg) {
+            const rawType=(cfg['filament_type']||'').split(';')[0].trim();
+            const prof=getMaterialProfile(rawType);
+            const dispLabel=prof.label+(rawType&&rawType.toLowerCase()!==prof.label.toLowerCase()?` (${rawType})`:'' );
+            setText('p-filament-type', dispLabel);
+            setText('p-z-hop',         `${prof.z_hop} mm`);
+            setText('p-speed-mult',    `${prof.speed_mult}×`);
+            setText('p-max-vol',       `${prof.max_vol} mm³/s`);
+            setText('p-max-travel',    `${prof.max_travel} mm/s`);
+            setText('p-uniform',       prof.uniform?'✔ Yes (outer wall fix)':'✗ No');
+        }
+
+        // --- VISUALIZATION ---
+        const C_EXTRUDE=new THREE.Color(0x3b82f6);
+        const C_TRAVEL =new THREE.Color(0x1d4ed8);
+        const C_SLOW   =new THREE.Color(0x3b82f6);
+        const C_MID    =new THREE.Color(0x22d3ee);
+        const C_FAST   =new THREE.Color(0xef4444);
+
+        // Feature color map — matches user-defined line type table
+        const FEATURE_COLOR_MAP = [
+            { keys:['inner wall','internal perimeter','wall-inner','internal'],       hex:'#facc15', label:'Inner Wall' },
+            { keys:['outer wall','external perimeter','wall-outer','external'],       hex:'#f97316', label:'Outer Wall' },
+            { keys:['sparse infill'],                                                 hex:'#991b1b', label:'Sparse Infill' },
+            { keys:['internal solid infill','solid infill'],                          hex:'#7c3aed', label:'Internal Solid Infill' },
+            { keys:['top surface','top solid infill'],                                hex:'#ef4444', label:'Top Surface' },
+            { keys:['bottom surface','bottom contour','first layer'],                 hex:'#4f46e5', label:'Bottom Surface' },
+            { keys:['bridge infill','bridge'],                                        hex:'#3b82f6', label:'Bridge' },
+            { keys:['gap infill','gap fill','small perimeter'],                       hex:'#f1f5f9', label:'Gap Infill' },
+            { keys:['skirt','brim','prime tower','wipe tower'],                       hex:'#14b8a6', label:'Skirt / Brim' },
+            { keys:['custom'],                                                        hex:'#86efac', label:'Custom' },
+            { keys:['support interface','support-interface'],                         hex:'#c084fc', label:'Support Interface' },
+            { keys:['support','support material'],                                    hex:'#a78bfa', label:'Support' },
+            { keys:['wipe'],                                                          hex:'#facc15', label:'Wipe' },
+            { keys:['seam','seams'],                                                  hex:'#e2e8f0', label:'Seams' },
+            { keys:['travel'],                                                        hex:'#1d4ed8', label:'Travel' },
+            { keys:['retract'],                                                       hex:'#d946ef', label:'Retract' },
+            { keys:['unretract','recover'],                                           hex:'#22d3ee', label:'Unretract' },
+        ];
+        const _fcc = {};
+        function featureToHex(feat){
+            const f=(feat||'unknown').toLowerCase();
+            if(_fcc[f])return _fcc[f];
+            for(const fc of FEATURE_COLOR_MAP){
+                if(fc.keys.some(k=>f.includes(k))){ _fcc[f]=fc.hex; return fc.hex; }
+            }
+            _fcc[f]='#64748b'; return '#64748b';
+        }
+        function featureToColor(feat){ return new THREE.Color(featureToHex(feat)); }
+
+        function feedrateToColor(f){
+            if(globalMaxF<=globalMinF)return C_EXTRUDE;
+            const t=Math.min(Math.max((f-globalMinF)/(globalMaxF-globalMinF),0),1);
+            return t<0.5?C_SLOW.clone().lerp(C_MID,t*2):C_MID.clone().lerp(C_FAST,(t-0.5)*2);
+        }
+        function getColorForMove(m, isCurrent){
+            if(colorMode==='speed' && m.type==='extrude') return feedrateToColor(m.f);
+            if(colorMode==='feature' && m.type==='extrude') return featureToColor(m.feature);
+            if(m.type==='travel') return C_TRAVEL;
+            return isCurrent ? C_EXTRUDE : new THREE.Color(0x1d4ed8);
+        }
+        function buildFeatureLegend(){
+            const el=document.getElementById('feature-legend-items');
+            if(!el)return; el.innerHTML='';
+            const fc=parsedData.featureCounts||{};
+            const seen=new Set(Object.keys(fc).map(k=>k.toLowerCase()));
+            parsedData.layers.forEach(l=>l.moves.forEach(m=>{ if(m.type==='travel')seen.add('travel'); }));
+            FEATURE_COLOR_MAP.forEach(fcm=>{
+                const match=[...seen].some(s=>fcm.keys.some(k=>s.includes(k)));
+                if(!match)return;
+                const row=document.createElement('div');
+                row.className='flex items-center gap-1.5';
+                row.innerHTML=`<div class="feat-dot" style="background:${fcm.hex}"></div><span class="text-[10px] text-slate-300">${fcm.label}</span>`;
+                el.appendChild(row);
+            });
+        }
+
+        function setLayer(idx){
             stopAnimation();
-            currentLayerIndex = parseInt(index);
-            const layer = parsedData.layers[currentLayerIndex];
-
-            document.getElementById('current-layer-badge').textContent = `L: ${currentLayerIndex + 1}`;
-            document.getElementById('stat-z-height').textContent = `Z: ${layer.z.toFixed(2)} mm`;
-
-            pathSlider.max   = layer.moves.length - 1;
-            pathSlider.value = layer.moves.length - 1;
-            currentPathIndex = layer.moves.length - 1;
-
-            rebuildForLayer();
-            updatePathView();
+            currentLayerIndex=parseInt(idx);
+            const layer=parsedData.layers[currentLayerIndex];
+            if(!layer)return;
+            layerLabel.textContent=currentLayerIndex;
+            layerZLabel.textContent=`z=${layer.z.toFixed(2)}`;
+            layerSlider.value=currentLayerIndex;
+            progressSlider.max=layer.moves.length-1;
+            progressSlider.value=layer.moves.length-1;
+            moveTotal.textContent=layer.moves.length;
+            setPathProgress(layer.moves.length-1);
         }
 
-        function setPathProgress(index) {
-            currentPathIndex = parseInt(index);
-            pathSlider.value = currentPathIndex;
-            updatePathView();
+        function setPathProgress(uptoIndex){
+            currentPathIndex=parseInt(uptoIndex);
+            progressSlider.value=currentPathIndex;
+            moveCurrent.textContent=currentPathIndex;
+            redrawScene();
         }
 
-        // ==========================================
-        // 6. EVENT LISTENERS
-        // ==========================================
-        layerSlider.addEventListener('input', (e) => setLayer(e.target.value));
-        pathSlider.addEventListener('input',  (e) => { stopAnimation(); setPathProgress(e.target.value); });
+        function redrawScene(){
+            while(objectGroup.children.length>1) objectGroup.remove(objectGroup.children[1]);
+            nozzleMesh.visible=false;
+            const showTravels  =document.getElementById('toggle-travels').checked;
+            const showAllLayers=document.getElementById('toggle-all-layers').checked;
+            const layerStart   =showAllLayers?0:currentLayerIndex;
 
-        // History toggle: invalidate cache so rebuildForLayer recreates it
-        toggleHistory.addEventListener('change', () => { historyBuiltForLayer = -1; rebuildForLayer(); updatePathView(); });
-        // Travel toggle: just flip visibility — no geometry rebuild needed
-        toggleTravel.addEventListener('change', () => { if (curTravelMesh) curTravelMesh.visible = toggleTravel.checked; });
+            for(let li=layerStart;li<=currentLayerIndex;li++){
+                const layer=parsedData.layers[li]; if(!layer)continue;
+                const isCur=(li===currentLayerIndex);
+                const upTo=isCur?currentPathIndex:layer.moves.length-1;
+                const pts=[],cols=[];
 
-        document.getElementById('btn-center').addEventListener('click', centerCamera);
-
-        document.getElementById('btn-layer-prev').addEventListener('click', () => {
-            if (currentLayerIndex > 0) {
-                layerSlider.value = currentLayerIndex - 1;
-                setLayer(currentLayerIndex - 1);
+                for(let i=0;i<=upTo;i++){
+                    const m=layer.moves[i];
+                    if(!showTravels&&m.type==='travel')continue;
+                    pts.push(m.x1,m.y1,m.z1,m.x2,m.y2,m.z2);
+                    const col=getColorForMove(m,isCur);
+                    cols.push(col.r,col.g,col.b,col.r,col.g,col.b);
+                    if(isCur&&i===upTo){ nozzleMesh.position.set(m.x2,m.y2,m.z2); nozzleMesh.visible=true; updateHUD(m); }
+                }
+                if(pts.length>0){
+                    const geo=new THREE.BufferGeometry();
+                    geo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
+                    geo.setAttribute('color',   new THREE.Float32BufferAttribute(cols,3));
+                    objectGroup.add(new THREE.LineSegments(geo,
+                        new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:isCur?1.0:0.35})));
+                }
             }
+        }
+
+        function updateHUD(m){
+            if(!m)return;
+            const typeLabel=m.type==='extrude'?'Extrude':m.type==='retract'?'Retract':'Travel';
+            const typeColor=m.type==='extrude'?'#f97316':m.type==='retract'?'#d946ef':'#1d4ed8';
+            document.getElementById('hud-dot').style.background=typeColor;
+            document.getElementById('hud-type').textContent=typeLabel;
+            const feat=m.feature||'unknown';
+            document.getElementById('hud-feat-dot').style.background=featureToHex(feat);
+            document.getElementById('hud-feature').textContent=feat==='unknown'?'—':feat;
+            document.getElementById('hud-f').textContent=`${(m.f/60).toFixed(1)} mm/s`;
+            document.getElementById('hud-x').textContent=(m.x2+gcOffsetX).toFixed(2);
+            document.getElementById('hud-y').textContent=(gcOffsetY-m.z2).toFixed(2);
+            document.getElementById('hud-z').textContent=m.y2.toFixed(2);
+            document.getElementById('hud-idx').textContent=currentPathIndex;
+            document.getElementById('hud-total').textContent=parsedData.layers[currentLayerIndex]?.moves.length??0;
+        }
+
+        // --- TABS ---
+        document.querySelectorAll('.tab-btn').forEach(btn=>{
+            btn.addEventListener('click',()=>{
+                document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+                document.querySelectorAll('.tab-pane').forEach(p=>p.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById('tab-'+btn.dataset.tab).classList.add('active');
+            });
         });
-        document.getElementById('btn-layer-next').addEventListener('click', () => {
-            if (currentLayerIndex < parsedData.layers.length - 1) {
-                layerSlider.value = currentLayerIndex + 1;
-                setLayer(currentLayerIndex + 1);
-            }
+
+        // --- CONTROLS ---
+        layerSlider.addEventListener('input',    e=>setLayer(e.target.value));
+        progressSlider.addEventListener('input', e=>{ stopAnimation(); setPathProgress(e.target.value); });
+        document.getElementById('btn-layer-up').addEventListener('click',()=>{ if(currentLayerIndex+1<parsedData.layers.length)setLayer(currentLayerIndex+1); });
+        document.getElementById('btn-layer-down').addEventListener('click',()=>{ if(currentLayerIndex-1>=0)setLayer(currentLayerIndex-1); });
+        ['toggle-travels','toggle-all-layers'].forEach(id=>
+            document.getElementById(id).addEventListener('change',()=>{ redrawScene(); })
+        );
+        document.querySelectorAll('.color-mode-btn').forEach(btn=>{
+            btn.addEventListener('click',()=>{
+                colorMode=btn.dataset.mode;
+                document.querySelectorAll('.color-mode-btn').forEach(b=>b.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById('speed-legend').classList.toggle('hidden', colorMode!=='speed');
+                document.getElementById('feature-legend').classList.toggle('hidden', colorMode!=='feature');
+                if(colorMode==='feature'&&parsedData.layers.length) buildFeatureLegend();
+                redrawScene();
+            });
         });
 
-        // ==========================================
-        // 7. PLAYBACK ENGINE
-        // ==========================================
-        function togglePlay() {
-            if (isPlaying) {
-                stopAnimation();
-            } else {
-                isPlaying = true;
-                btnPlay.innerHTML = `<i data-lucide="pause" class="w-4 h-4"></i> Pause`;
-                lucide.createIcons();
-                playAccum = 0;
-                const max = parsedData.layers[currentLayerIndex].moves.length - 1;
-                if (currentPathIndex >= max) { currentPathIndex = 0; pathSlider.value = 0; }
-                playLoop();
-            }
+        // --- PLAYBACK ---
+        function togglePlay(){
+            if(isPlaying){stopAnimation();return;}
+            const max=parsedData.layers[currentLayerIndex]?.moves.length-1??0;
+            if(currentPathIndex>=max)currentPathIndex=0;
+            isPlaying=true; playIcon.setAttribute('data-lucide','pause'); lucide.createIcons();
+            playAccum=0; playLoop();
         }
-
-        function stopAnimation() {
-            isPlaying = false;
-            btnPlay.innerHTML = `<i data-lucide="play" class="w-4 h-4"></i> Play`;
-            lucide.createIcons();
-            cancelAnimationFrame(playAnimationId);
+        function stopAnimation(){
+            isPlaying=false;
+            if(playAnimationId)cancelAnimationFrame(playAnimationId);
+            playIcon.setAttribute('data-lucide','play'); lucide.createIcons();
         }
-
-        function playLoop() {
-            if (!isPlaying) return;
-            const max = parsedData.layers[currentLayerIndex].moves.length - 1;
-
-            playAccum += playSpeed;
-            const steps = Math.floor(playAccum);
-            playAccum -= steps;
-
-            if (steps > 0) {
-                currentPathIndex = Math.min(currentPathIndex + steps, max);
+        function playLoop(){
+            if(!isPlaying)return;
+            const max=parsedData.layers[currentLayerIndex]?.moves.length-1??0;
+            playAccum+=playSpeed;
+            if(playAccum>=1){
+                const steps=Math.floor(playAccum); playAccum-=steps;
+                currentPathIndex=Math.min(currentPathIndex+steps,max);
                 setPathProgress(currentPathIndex);
-                if (currentPathIndex >= max) { stopAnimation(); return; }
-
-                if (document.getElementById('toggle-follow').checked) {
-                    const m = parsedData.layers[currentLayerIndex].moves[currentPathIndex];
-                    controls.target.lerp(
-                        new THREE.Vector3(m.x2 + objectGroup.position.x, m.y2 + objectGroup.position.y, m.z2),
-                        0.12
-                    );
-                }
+                if(currentPathIndex>=max){stopAnimation();return;}
+                if(document.getElementById('toggle-follow').checked) controls.target.lerp(nozzleMesh.position,0.12);
             }
-            playAnimationId = requestAnimationFrame(playLoop);
+            playAnimationId=requestAnimationFrame(playLoop);
         }
 
-        btnPlay.addEventListener('click', togglePlay);
-        document.getElementById('btn-rewind').addEventListener('click', () => { stopAnimation(); setPathProgress(0); });
-        document.getElementById('btn-fast-forward').addEventListener('click', () => {
-            stopAnimation();
-            setPathProgress(parsedData.layers[currentLayerIndex].moves.length - 1);
-        });
-        document.getElementById('speed-slider').addEventListener('input', (e) => {
-            const i = parseInt(e.target.value);
-            playSpeed = SPEED_STEPS[i];
-            playAccum = 0;
-            document.getElementById('speed-label').textContent = SPEED_LABELS[i];
+        document.getElementById('btn-play').addEventListener('click',togglePlay);
+        document.getElementById('btn-rewind').addEventListener('click',()=>{ stopAnimation(); setPathProgress(0); });
+        document.getElementById('btn-fast-forward').addEventListener('click',()=>{ stopAnimation(); setPathProgress(parsedData.layers[currentLayerIndex]?.moves.length-1??0); });
+        document.getElementById('btn-step-back').addEventListener('click',()=>{ stopAnimation(); setPathProgress(Math.max(currentPathIndex-1,0)); });
+        document.getElementById('btn-step-fwd').addEventListener('click',()=>{ stopAnimation(); const max=parsedData.layers[currentLayerIndex]?.moves.length-1??0; setPathProgress(Math.min(currentPathIndex+1,max)); });
+        document.getElementById('speed-slider').addEventListener('input',e=>{ const i=parseInt(e.target.value); playSpeed=SPEED_STEPS[i]; playAccum=0; document.getElementById('speed-label').textContent=SPEED_LABELS[i]; });
+
+        // --- KEYBOARD SHORTCUTS ---
+        document.addEventListener('keydown',e=>{
+            if(e.target.tagName==='INPUT')return;
+            switch(e.key){
+                case ' ':         e.preventDefault(); togglePlay(); break;
+                case 'ArrowUp':   if(currentLayerIndex+1<parsedData.layers.length)setLayer(currentLayerIndex+1); break;
+                case 'ArrowDown': if(currentLayerIndex-1>=0)setLayer(currentLayerIndex-1); break;
+                case 'ArrowRight':{ stopAnimation(); const max=parsedData.layers[currentLayerIndex]?.moves.length-1??0; setPathProgress(Math.min(currentPathIndex+10,max)); break; }
+                case 'ArrowLeft': { stopAnimation(); setPathProgress(Math.max(currentPathIndex-10,0)); break; }
+                case 'Home': setLayer(0); break;
+                case 'End':  setLayer(parsedData.layers.length-1); break;
+                case 'r': case 'R': camera.position.set(-60,200,220); controls.target.set(128,20,-128); controls.update(); break;
+            }
         });
 
-        // Boot!
+        // --- PLATE COLOR CYCLE ---
+        const PLATE_PRESETS = [
+            { label:'Void',    hex:'#020617', color:0x020617, opacity:0.85, grid1:0x1e293b, grid2:0x111827 },
+            { label:'Slate',   hex:'#1e293b', color:0x1e293b, opacity:0.90, grid1:0x334155, grid2:0x1e293b },
+            { label:'Steel',   hex:'#374151', color:0x374151, opacity:0.92, grid1:0x4b5563, grid2:0x374151 },
+            { label:'Ash',     hex:'#6b7280', color:0x6b7280, opacity:0.88, grid1:0x9ca3af, grid2:0x6b7280 },
+            { label:'Pearl',   hex:'#d1d5db', color:0xd1d5db, opacity:0.85, grid1:0xe5e7eb, grid2:0xd1d5db },
+        ];
+        let platePresetIdx = 2; // default: Ash
+        (function applyInitialPlate(){
+            const p = PLATE_PRESETS[platePresetIdx];
+            if (plateMesh) { plateMesh.material.color.setHex(p.color); plateMesh.material.opacity = p.opacity; }
+            if (gridHelper) {
+                gridHelper.material[0] && (gridHelper.material[0].color.setHex(p.grid1));
+                gridHelper.material[1] && (gridHelper.material[1].color.setHex(p.grid2));
+            }
+            document.getElementById('btn-plate-swatch').style.background = p.hex;
+            document.getElementById('btn-plate-label').textContent = `Plate: ${p.label}`;
+        })();
+        document.getElementById('btn-plate-color').addEventListener('click', () => {
+            platePresetIdx = (platePresetIdx + 1) % PLATE_PRESETS.length;
+            const p = PLATE_PRESETS[platePresetIdx];
+            if (plateMesh) {
+                plateMesh.material.color.setHex(p.color);
+                plateMesh.material.opacity = p.opacity;
+            }
+            if (gridHelper) {
+                gridHelper.material[0] && (gridHelper.material[0].color.setHex(p.grid1));
+                gridHelper.material[1] && (gridHelper.material[1].color.setHex(p.grid2));
+            }
+            document.getElementById('btn-plate-swatch').style.background = p.hex;
+            document.getElementById('btn-plate-label').textContent = `Plate: ${p.label}`;
+        });
+
+        document.getElementById('btn-theme').addEventListener('click', () => {
+            const isLight = document.body.classList.toggle('light');
+            const btn = document.getElementById('btn-theme');
+            const lbl = document.getElementById('btn-theme-label');
+            lbl.textContent = isLight ? 'Dark Mode' : 'Light Mode';
+            btn.querySelector('i').setAttribute('data-lucide', isLight ? 'moon' : 'sun');
+            lucide.createIcons();
+            // Update scene background
+            if (scene) scene.fog = new THREE.FogExp2(isLight ? 0xd0d8e8 : 0x0a0f1e, 0.003);
+            if (renderer) renderer.setClearColor(isLight ? 0xe8edf5 : 0x000000, isLight ? 1 : 0);
+        });
+
         initThreeJS();
+        // Apply light-mode renderer defaults after init
+        if (renderer) renderer.setClearColor(0xe8edf5, 1);
     </script>
 </body>
 </html>
