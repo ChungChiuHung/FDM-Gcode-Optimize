@@ -96,8 +96,8 @@ def get_material_profile(filament_type: str, header_text: str = "") -> Dict[str,
     elif any(kw in filament_type for kw in ["CF", "GF", "CARBON", "GLASS"]):
         profile.update({
             "z_hop": 0.2,               
-            "speed_multiplier": 0.8,     
-            "max_travel_speed": 15000,
+            "speed_multiplier": 0.85,
+            "max_travel_speed": 18000,
             "max_volumetric_speed": max_vol_speed or 8.0,   # 纖維導致熔體黏度飆升，降低流量上限
             "glass_transition_temp": 65 if "PLA" in filament_type else (75 if "PETG" in filament_type else 100)
         })
