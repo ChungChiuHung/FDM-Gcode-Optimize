@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>H2C G-Code Viewer</title>
+    <title>H2C G-Code & NC Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -153,7 +153,7 @@
         }
 
         body.dragover::after {
-            content:'Drop G-code Here';
+            content:'Drop G-code / NC Here';
             position:fixed; inset:0; z-index:200;
             display:flex; align-items:center; justify-content:center;
             font-size:2rem; font-weight:700; color:var(--accent);
@@ -248,7 +248,7 @@
                 <i data-lucide="layers" class="w-5 h-5 text-blue-400"></i>
             </div>
             <div class="min-w-0">
-                <h1 class="text-sm font-bold leading-tight">H2C G-Code Viewer</h1>
+                <h1 class="text-sm font-bold leading-tight">H2C G-Code & NC Viewer</h1>
                 <p id="file-name-display" class="text-xs text-slate-500 truncate">No file loaded</p>
             </div>
         </div>
@@ -256,9 +256,9 @@
                        border border-dashed border-slate-600 rounded-xl cursor-pointer
                        hover:bg-blue-500/10 hover:border-blue-500 transition-all text-sm
                        font-medium text-slate-300 hover:text-blue-300">
-            <input type="file" id="file-input" accept=".gcode" class="hidden">
+            <input type="file" id="file-input" accept=".gcode,.nc" class="hidden">
             <i data-lucide="upload-cloud" class="w-4 h-4"></i>
-            <span>Browse or Drop G-code</span>
+            <span>Browse or Drop G-code / NC</span>
         </label>
     </div>
 
@@ -272,15 +272,15 @@
 
         <!-- STATS TAB -->
         <div class="tab-pane active p-3 flex flex-col gap-1 max-h-72 overflow-y-auto" id="tab-stats">
-            <div class="param-row"><span class="param-key">Print Time</span><span class="param-val hi" id="s-print-time">—</span></div>
-            <div class="param-row"><span class="param-key">Layers</span><span class="param-val" id="s-layers">—</span></div>
+            <div class="param-row"><span class="param-key" id="lbl-print-time">Print Time</span><span class="param-val hi" id="s-print-time">—</span></div>
+            <div class="param-row"><span class="param-key" id="lbl-layers">Layers</span><span class="param-val" id="s-layers">—</span></div>
             <div class="param-row"><span class="param-key">Total Moves</span><span class="param-val" id="s-moves">—</span></div>
-            <div class="param-row"><span class="param-key">Filament Used</span><span class="param-val" id="s-filament-len">—</span></div>
-            <div class="param-row"><span class="param-key">Weight</span><span class="param-val" id="s-weight">—</span></div>
-            <div class="param-row"><span class="param-key">Max Z Height</span><span class="param-val" id="s-maxz">—</span></div>
-            <div class="param-row"><span class="param-key">Slicer</span><span class="param-val" id="s-slicer">—</span></div>
-            <div class="param-row"><span class="param-key">Retractions</span><span class="param-val" id="s-retract-count">—</span></div>
-            <div class="param-row"><span class="param-key">Top Feature</span><span class="param-val" id="s-top-feature">—</span></div>
+            <div class="param-row"><span class="param-key" id="lbl-filament-len">Filament Used</span><span class="param-val" id="s-filament-len">—</span></div>
+            <div class="param-row"><span class="param-key" id="lbl-weight">Weight</span><span class="param-val" id="s-weight">—</span></div>
+            <div class="param-row"><span class="param-key" id="lbl-maxz">Max Z Height</span><span class="param-val" id="s-maxz">—</span></div>
+            <div class="param-row"><span class="param-key" id="lbl-slicer">Slicer</span><span class="param-val" id="s-slicer">—</span></div>
+            <div class="param-row"><span class="param-key" id="lbl-retract-count">Retractions</span><span class="param-val" id="s-retract-count">—</span></div>
+            <div class="param-row"><span class="param-key" id="lbl-top-feature">Top Feature</span><span class="param-val" id="s-top-feature">—</span></div>
         </div>
 
         <!-- CONFIG TAB -->
@@ -486,7 +486,7 @@
         let objectGroup = new THREE.Group();
         let nozzleMesh, plateMesh, gridHelper;
         let parsedData = { layers: [], config: {}, header: {} };
-        let gcOffsetX = 0, gcOffsetY = 0;
+        let gcOffsetX = 0, gcOffsetY = 0, gcZOffset = 0;
 
         let globalMinF = Infinity;
         let globalMaxF = -Infinity;
@@ -501,6 +501,7 @@
         const SPEED_LABELS = ['0.05x','0.25x','1x','3x','8x','20x'];
         let playSpeed = SPEED_STEPS[2];
         let colorMode = 'default';
+        let isCNC = false;
 
         // --- DOM Elements ---
         const layerSlider    = document.getElementById('layer-slider');
@@ -586,12 +587,15 @@
         document.getElementById('file-input').addEventListener('change', e => handleFile(e.target.files[0]));
 
         function handleFile(file) {
-            if (!file || !file.name.endsWith('.gcode')) { alert('Please drop a .gcode file.'); return; }
-            document.getElementById('file-name-display').textContent = file.name;
+            if (!file) return;
+            const nm = file.name.toLowerCase();
+            if (!nm.endsWith('.gcode') && !nm.endsWith('.nc')) { alert('Please drop a .gcode or .nc file.'); return; }
+            isCNC = nm.endsWith('.nc');
+            document.getElementById('file-name-display').textContent = (isCNC ? '[CNC] ' : '') + file.name;
             loadingOverlay.classList.remove('hidden');
             setTimeout(() => {
                 const reader = new FileReader();
-                reader.onload = ev => parseGCode(ev.target.result);
+                reader.onload = ev => isCNC ? parseCNCGCode(ev.target.result) : parseGCode(ev.target.result);
                 reader.readAsText(file);
             }, 40);
         }
@@ -722,27 +726,136 @@
             loadingOverlay.classList.add('hidden');
         }
 
+        // --- CNC G-CODE PARSER ---
+        function parseCNCGCode(gcode) {
+            parsedData = { layers:[], config:{}, header:{}, retractCount:0, featureCounts:{},
+                           cncInfo:{ programNumber:'', toolChanges:0, spindleSpeeds:[], workOffset:'G54' } };
+            globalMinF = Infinity; globalMaxF = -Infinity;
+            const lines = gcode.split('\n');
+            let x=0, y=0, z=0, f=1000, absPos=true;
+            let modalMotion='G0', spindleOn=false, lastZ=99999;
+            let currentLayer = { z:0, moves:[] };
+
+            for (let i=0; i<lines.length; i++) {
+                let raw = lines[i].trim();
+                raw = raw.replace(/\([^)]*\)/g,'').trim(); // strip (...) comments
+                raw = raw.split(';')[0].trim();             // strip ; comments
+                raw = raw.replace(/^N\d+\s*/i,'').trim();   // strip N line numbers
+                const om = raw.match(/^O(\d+)/i);
+                if (om) { parsedData.cncInfo.programNumber=om[1]; raw=raw.slice(om[0].length).trim(); }
+                if (!raw || raw==='%') continue;
+
+                const tok = raw.toUpperCase().split(/\s+/);
+                let nx=x, ny=y, nz=z, nf=f;
+                let hasX=false, hasY=false, hasZ=false;
+                let i_arc=0, j_arc=0, hasArc=false, motionCmd=null;
+
+                for (const t of tok) {
+                    if (!t) continue;
+                    const v = parseFloat(t.slice(1));
+                    switch (t[0]) {
+                        case 'G': {
+                            const g=parseInt(t.slice(1));
+                            if      (g===0)          { modalMotion='G0'; motionCmd='G0'; }
+                            else if (g===1)          { modalMotion='G1'; motionCmd='G1'; }
+                            else if (g===2)          { modalMotion='G2'; motionCmd='G2'; }
+                            else if (g===3)          { modalMotion='G3'; motionCmd='G3'; }
+                            else if (g===90)         absPos=true;
+                            else if (g===91)         absPos=false;
+                            else if (g>=54&&g<=59)   parsedData.cncInfo.workOffset='G'+g;
+                            break;
+                        }
+                        case 'M': {
+                            const m=parseInt(t.slice(1));
+                            if (m===3||m===4) spindleOn=true;
+                            if (m===5)        spindleOn=false;
+                            if (m===6)        parsedData.cncInfo.toolChanges++;
+                            break;
+                        }
+                        case 'S': if(!isNaN(v)) parsedData.cncInfo.spindleSpeeds.push(v); break;
+                        case 'X': if(!isNaN(v)){ nx=absPos?v:x+v; hasX=true; } break;
+                        case 'Y': if(!isNaN(v)){ ny=absPos?v:y+v; hasY=true; } break;
+                        case 'Z': if(!isNaN(v)){ nz=absPos?v:z+v; hasZ=true; } break;
+                        case 'F': if(!isNaN(v)) nf=v; break;
+                        case 'I': if(!isNaN(v)){ i_arc=v; hasArc=true; } break;
+                        case 'J': if(!isNaN(v)){ j_arc=v; hasArc=true; } break;
+                    }
+                }
+                f=nf;
+                if (!hasX && !hasY && !hasZ) { x=nx; y=ny; z=nz; continue; }
+
+                const cmd     = motionCmd || modalMotion;
+                const isRapid = (cmd==='G0');
+                const mtype   = isRapid ? 'travel' : 'extrude';
+                const feature = isRapid ? 'rapid'  : 'cutting';
+                if (!isRapid) { globalMinF=Math.min(globalMinF,f); globalMaxF=Math.max(globalMaxF,f); }
+
+                if (Math.abs(nz-lastZ) > 0.001) {
+                    if (currentLayer.moves.length) parsedData.layers.push(currentLayer);
+                    currentLayer = { z:nz, moves:[] };
+                    lastZ = nz;
+                }
+
+                if ((cmd==='G2'||cmd==='G3') && hasArc) {
+                    const cx=x+i_arc, cy=y+j_arc;
+                    let sa=Math.atan2(y-cy,x-cx), ea=Math.atan2(ny-cy,nx-cx);
+                    if(cmd==='G2'&&ea>sa) ea-=Math.PI*2;
+                    if(cmd==='G3'&&ea<sa) ea+=Math.PI*2;
+                    const radius=Math.hypot(i_arc,j_arc);
+                    const segs=Math.max(6,Math.min(64,Math.ceil(radius*Math.abs(ea-sa))));
+                    let lx=x, ly=y, lz=z;
+                    for (let s=1; s<=segs; s++) {
+                        const tp=s/segs, ang=sa+(ea-sa)*tp;
+                        const px=cx+radius*Math.cos(ang), py=cy+radius*Math.sin(ang), pz=z+(nz-z)*tp;
+                        currentLayer.moves.push({type:mtype,x1:lx,y1:ly,z1:lz,x2:px,y2:py,z2:pz,f,feature});
+                        lx=px; ly=py; lz=pz;
+                    }
+                } else {
+                    currentLayer.moves.push({type:mtype,x1:x,y1:y,z1:z,x2:nx,y2:ny,z2:nz,f,feature});
+                }
+                if (!isRapid) parsedData.featureCounts[feature]=(parsedData.featureCounts[feature]||0)+1;
+                x=nx; y=ny; z=nz;
+            }
+            if (currentLayer.moves.length) parsedData.layers.push(currentLayer);
+            centerGeometry();
+            populateUI();
+            const n = parsedData.layers.length;
+            if (n>0){ layerSlider.max=n-1; layerSlider.value=n-1; setLayer(n-1); }
+            loadingOverlay.classList.add('hidden');
+        }
+
         function centerGeometry() {
-            let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
-            const s = parsedData.layers.length>1 ? parsedData.layers.slice(1) : parsedData.layers;
+            let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity,minZgc=Infinity;
+            // CNC: use all moves for bounds; FDM: skip layer 0, extrude only
+            const s = (parsedData.layers.length>1 && !isCNC) ? parsedData.layers.slice(1) : parsedData.layers;
             s.forEach(l=>l.moves.forEach(m=>{
-                if(m.type==='extrude'){
-                    minX=Math.min(minX,m.x1,m.x2);maxX=Math.max(maxX,m.x1,m.x2);
-                    minY=Math.min(minY,m.y1,m.y2);maxY=Math.max(maxY,m.y1,m.y2);
+                if(m.type==='extrude' || isCNC){
+                    minX=Math.min(minX,m.x1,m.x2); maxX=Math.max(maxX,m.x1,m.x2);
+                    minY=Math.min(minY,m.y1,m.y2); maxY=Math.max(maxY,m.y1,m.y2);
+                    if(isCNC) minZgc=Math.min(minZgc,m.z1,m.z2);
                 }
             }));
             if(!isFinite(minX)){minX=0;maxX=256;minY=0;maxY=256;}
+            if(!isFinite(minZgc)) minZgc=0;
             gcOffsetX = minX; gcOffsetY = minY;
+            // gcZOffset restores G-code Z from Three.js Y: G-code Z = Three.js Y + gcZOffset
+            gcZOffset = isCNC ? minZgc : 0;
             parsedData.layers.forEach(l=>l.moves.forEach(m=>{
                 m.x1-=gcOffsetX; m.x2-=gcOffsetX;
-                const oy1=m.y1,oy2=m.y2;
-                m.y1=m.z1; m.y2=m.z2;
+                const oy1=m.y1, oy2=m.y2;
+                if (isCNC) {
+                    // Shift Z so deepest cut lands at Y=0 (plate); safe height floats above
+                    m.y1=m.z1-minZgc; m.y2=m.z2-minZgc;
+                } else {
+                    m.y1=m.z1; m.y2=m.z2;
+                }
                 m.z1=-(oy1-gcOffsetY); m.z2=-(oy2-gcOffsetY);
             }));
         }
 
         // --- POPULATE PARAM PANELS ---
         function setText(id,val){ const e=document.getElementById(id); if(e)e.textContent=val??'—'; }
+        function setLbl(id,val) { const e=document.getElementById(id); if(e)e.textContent=val??'—'; }
         function fmtVal(raw,unit){
             if(!raw)return'—';
             const first=String(raw).split(',')[0].trim().replace(/^nil$/,'');
@@ -751,7 +864,39 @@
             return isNaN(n)?first:`${n} ${unit}`;
         }
 
+        function populateCNCUI() {
+            const ci = parsedData.cncInfo || {};
+            const totalMoves = parsedData.layers.reduce((a,l)=>a+l.moves.length, 0);
+            setLbl('lbl-print-time','Program #');    setLbl('lbl-layers','Depth Levels');
+            setLbl('lbl-filament-len','Feedrate');   setLbl('lbl-weight','Tool Changes');
+            setLbl('lbl-maxz','Max Depth');          setLbl('lbl-slicer','Machine Type');
+            setLbl('lbl-retract-count','Spindle RPM'); setLbl('lbl-top-feature','Work Offset');
+            setText('s-print-time', ci.programNumber ? 'O'+ci.programNumber : '—');
+            setText('s-layers',     parsedData.layers.length);
+            setText('s-moves',      totalMoves.toLocaleString());
+            const fMinS = isFinite(globalMinF) ? (globalMinF/60).toFixed(1)+'–'+(globalMaxF/60).toFixed(1)+' mm/s' : '—';
+            setText('s-filament-len', fMinS);
+            setText('s-weight',     ci.toolChanges ?? '—');
+            const allZ = parsedData.layers.map(l=>l.z);
+            setText('s-maxz',       allZ.length ? Math.min(...allZ).toFixed(3)+' mm' : '—');
+            setText('s-slicer',     'CNC Mill / Lathe');
+            const uspd = [...new Set(ci.spindleSpeeds||[])].sort((a,b)=>b-a);
+            setText('s-retract-count', uspd.length ? uspd.join(' / ')+' RPM' : '—');
+            setText('s-top-feature', ci.workOffset || '—');
+            if(isFinite(globalMinF)&&globalMaxF>globalMinF){
+                document.getElementById('legend-min').textContent=(globalMinF/60).toFixed(1);
+                document.getElementById('legend-max').textContent=(globalMaxF/60).toFixed(1);
+            }
+            document.getElementById('info-panel').classList.remove('hidden');
+        }
+
         function populateUI() {
+            if (isCNC) { populateCNCUI(); return; }
+            // Restore FDM stat labels (in case CNC was loaded before)
+            setLbl('lbl-print-time','Print Time');  setLbl('lbl-layers','Layers');
+            setLbl('lbl-filament-len','Filament Used'); setLbl('lbl-weight','Weight');
+            setLbl('lbl-maxz','Max Z Height');      setLbl('lbl-slicer','Slicer');
+            setLbl('lbl-retract-count','Retractions'); setLbl('lbl-top-feature','Top Feature');
             const cfg=parsedData.config, hdr=parsedData.header;
             const totalMoves=parsedData.layers.reduce((a,l)=>a+l.moves.length,0);
 
@@ -840,7 +985,7 @@
             if(t.includes('petg'))                         return {z_hop:0.6,speed_mult:0.9, max_vol:10.0,max_travel:200, uniform:true,  label:'PETG'};
             if(t.includes('pa')||t.includes('nylon'))      return {z_hop:0.6,speed_mult:0.9, max_vol:10.0,max_travel:200, uniform:true,  label:'PA/Nylon'};
             if(t.includes('-cf')||t.includes(' cf')||
-               t.includes('-gf')||t.includes(' gf'))       return {z_hop:0.2,speed_mult:0.8, max_vol:8.0, max_travel:300, uniform:false, label:'CF/GF'};
+               t.includes('-gf')||t.includes(' gf'))       return {z_hop:0.2,speed_mult:0.85,max_vol:8.0, max_travel:300, uniform:false, label:'CF/GF'};
             if(t.includes('abs')||t.includes('asa'))       return {z_hop:0.3,speed_mult:0.95,max_vol:18.0,max_travel:400, uniform:false, label:'ABS/ASA'};
             return                                                {z_hop:0.4,speed_mult:1.0, max_vol:15.0,max_travel:500, uniform:false, label:'PLA'};
         }
@@ -883,6 +1028,8 @@
             { keys:['travel'],                                                        hex:'#1d4ed8', label:'Travel' },
             { keys:['retract'],                                                       hex:'#d946ef', label:'Retract' },
             { keys:['unretract','recover'],                                           hex:'#22d3ee', label:'Unretract' },
+            { keys:['cutting','cut'],                                                  hex:'#22c55e', label:'Cutting Move' },
+            { keys:['rapid'],                                                          hex:'#1e40af', label:'Rapid Move' },
         ];
         const _fcc = {};
         function featureToHex(feat){
@@ -976,7 +1123,9 @@
 
         function updateHUD(m){
             if(!m)return;
-            const typeLabel=m.type==='extrude'?'Extrude':m.type==='retract'?'Retract':'Travel';
+            const typeLabel=isCNC
+                ? (m.type==='extrude'?'Cut':'Rapid')
+                : (m.type==='extrude'?'Extrude':m.type==='retract'?'Retract':'Travel');
             const typeColor=m.type==='extrude'?'#f97316':m.type==='retract'?'#d946ef':'#1d4ed8';
             document.getElementById('hud-dot').style.background=typeColor;
             document.getElementById('hud-type').textContent=typeLabel;
@@ -986,7 +1135,7 @@
             document.getElementById('hud-f').textContent=`${(m.f/60).toFixed(1)} mm/s`;
             document.getElementById('hud-x').textContent=(m.x2+gcOffsetX).toFixed(2);
             document.getElementById('hud-y').textContent=(gcOffsetY-m.z2).toFixed(2);
-            document.getElementById('hud-z').textContent=m.y2.toFixed(2);
+            document.getElementById('hud-z').textContent=(m.y2+gcZOffset).toFixed(2);
             document.getElementById('hud-idx').textContent=currentPathIndex;
             document.getElementById('hud-total').textContent=parsedData.layers[currentLayerIndex]?.moves.length??0;
         }
