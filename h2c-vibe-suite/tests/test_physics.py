@@ -18,14 +18,17 @@ def test_petg_wipe_activation():
 
 def test_first_layer_bed_adhesion():
     """確保首層列印時，熱力均衡器會鎖定溫度，絕對不會啟動冷卻模式以防脫膠"""
-    # FIX BUG 4: correct param name is island_dist (not island_extrude_dist);
-    # flow_rate is required positional arg and must be provided.
-    state, temp = calculate_thermal_state(base_temp=220, island_dist=5.0, flow_rate=3.0, is_first_layer=True)
+    # calculate_thermal_state expects base_temp_dict: {"initial": int, "normal": int}
+    # is_first_layer=True → returns ("BED_ADHESION", base_temp_dict["initial"])
+    base = {"initial": 220, "normal": 220}
+    state, temp = calculate_thermal_state(base, island_dist=5.0, flow_rate=3.0, is_first_layer=True)
     assert state == "BED_ADHESION"
     assert temp == 220
 
 def test_thermal_cooling_mode():
     """確保遇到微小特徵（擠出距離小於 15mm）且非首層時，會自動降溫 5 度"""
-    state, temp = calculate_thermal_state(base_temp=220, island_dist=10.0, flow_rate=1.0, is_first_layer=False)
+    # island_dist=10 ≤ 15 AND flow_rate=1.0 ≤ 3.0 → COOLING, normal - 5
+    base = {"initial": 220, "normal": 220}
+    state, temp = calculate_thermal_state(base, island_dist=10.0, flow_rate=1.0, is_first_layer=False)
     assert state == "COOLING"
     assert temp == 215
