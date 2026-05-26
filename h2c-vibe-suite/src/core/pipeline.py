@@ -131,7 +131,10 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
             for chunk in chunks:
                 
                 # --- A. 體積流量與噴嘴熱平衡計算 (Nozzle Thermodynamics) ---
-                if base_temp and any(m['type'] == 'extrude' for m in chunk):
+                # Guard: skip if temperature dict is absent or has a physically impossible
+                # baseline (≤50°C) — prevents injecting M104 S-5 from malformed headers.
+                MIN_MEANINGFUL_SPEED = 1.0  # mm/s; below this vol_flow is meaningless
+                if base_temp and base_temp.get("normal", 0) > 50 and any(m['type'] == 'extrude' for m in chunk):
                     sample_feat = next((m.get('feature', '').lower() for m in chunk if m['type'] == 'extrude'), "")
                     is_system_chunk = not any(kw in sample_feat for kw in _MODEL_TAGS)
                     
@@ -141,7 +144,9 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
                         
                         if island_dist > 0.001:
                             ref_speed = next((m['feedrate'] for m in chunk if m['type'] == 'extrude'), 3000) / 60.0
-                            vol_flow = (island_e * FILAMENT_AREA) / (island_dist / ref_speed) if ref_speed > 0 else 0
+                            # Guard: near-zero feedrate would produce astronomically large
+                            # vol_flow and permanently lock all chunks into BONDING mode.
+                            vol_flow = (island_e * FILAMENT_AREA) / (island_dist / ref_speed) if ref_speed >= MIN_MEANINGFUL_SPEED else 0
                             
                             target_state, target_temp = calculate_thermal_state(base_temp, island_dist, vol_flow, is_first_layer)
                             if current_eq_state != target_state:

@@ -1,10 +1,11 @@
 import os
 import re
 import math
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Set
 
 # 型別別名，提升維護性
 Point2D = Tuple[float, float]
+CellKey = Tuple[int, int]
 
 class GCodeCollisionChecker:
     """
@@ -16,8 +17,7 @@ class GCodeCollisionChecker:
     ENDPOINT_TOLERANCE = 0.05    # mm: 排除接縫擦拭與端點重合的誤判
     ZHOP_TOLERANCE = 0.02       # mm: 判定安全抬刀的高度閾值
     MIN_LAYER_HEIGHT = 0.15     # mm: 忽略機台初始清理線
-    MICRO_GLIDE_LIMIT = 3.0     # mm: 與 ZHopInjector 保持一致的 3.0mm 滑行容忍度
-    
+    MICRO_GLIDE_LIMIT = 3.0     # mm: 與 ZHopInjector 保持一致的 3.0mm 滑行容忍度    CELL_SIZE = 10.0            # mm: spatial-hash grid cell side length    
     def __init__(self):
         self.reset_state()
 
@@ -31,10 +31,47 @@ class GCodeCollisionChecker:
         self.is_absolute_pos = True  
         self.current_layer_z = 0.0
         self.current_feature = "Unknown"
-        self.extruded_lines: List[Dict] = []
+        # Spatial hash grid: maps (cell_x, cell_y) → list of wall-segment dicts.
+        # Replaces the flat extruded_lines list for O(1) average bucket lookup.
+        self._grid: Dict[CellKey, List[Dict]] = {}
         self.total_collisions = 0
         self.layer_num = 0
         self.is_new_layer = False
+
+    # ------------------------------------------------------------------
+    # Spatial-hash helpers
+    # ------------------------------------------------------------------
+
+    def _cells_for_bbox(self, x1: float, y1: float, x2: float, y2: float) -> List[CellKey]:
+        """Return every grid cell whose bounding box overlaps the given AABB."""
+        cs = self.CELL_SIZE
+        cx_lo = int(math.floor(min(x1, x2) / cs))
+        cx_hi = int(math.floor(max(x1, x2) / cs))
+        cy_lo = int(math.floor(min(y1, y2) / cs))
+        cy_hi = int(math.floor(max(y1, y2) / cs))
+        return [
+            (cx, cy)
+            for cx in range(cx_lo, cx_hi + 1)
+            for cy in range(cy_lo, cy_hi + 1)
+        ]
+
+    def _add_wall(self, seg_dict: Dict) -> None:
+        """Bucket a wall segment into every cell its bounding box covers."""
+        (x1, y1), (x2, y2) = seg_dict['segment']
+        for cell in self._cells_for_bbox(x1, y1, x2, y2):
+            self._grid.setdefault(cell, []).append(seg_dict)
+
+    def _candidates(self, ts: Point2D, te: Point2D) -> List[Dict]:
+        """Collect deduplicated wall segments from cells overlapping the travel bbox."""
+        seen: Set[int] = set()
+        result: List[Dict] = []
+        for cell in self._cells_for_bbox(ts[0], ts[1], te[0], te[1]):
+            for seg in self._grid.get(cell, []):
+                sid = id(seg)
+                if sid not in seen:
+                    seen.add(sid)
+                    result.append(seg)
+        return result
 
     @staticmethod
     def ccw(A: Point2D, B: Point2D, C: Point2D) -> bool:
@@ -78,7 +115,7 @@ class GCodeCollisionChecker:
 
         critical_tags = ["outer wall", "top surface", "external", "wall-outer"]
         
-        for wall in self.extruded_lines:
+        for wall in self._candidates(ts, te):
             feat = wall['feature'].lower()
             if any(tag in feat for tag in critical_tags):
                 ws, we = wall['segment']
@@ -109,7 +146,7 @@ class GCodeCollisionChecker:
 
                     # 捕捉切片軟體的換層標記，強制清空記憶體
                     if line_upper.startswith("; LAYER_CHANGE") or line_upper.startswith(";LAYER_CHANGE"):
-                        self.extruded_lines.clear()
+                        self._grid.clear()
                         self.layer_num += 1
                         self.is_new_layer = True
                         continue
@@ -168,7 +205,7 @@ class GCodeCollisionChecker:
                                     self.current_layer_z = nz
                                     self.is_new_layer = False
 
-                                self.extruded_lines.append({
+                                self._add_wall({
                                     'segment': ((self.current_x, self.current_y), (nx, ny)),
                                     'feature': self.current_feature
                                 })

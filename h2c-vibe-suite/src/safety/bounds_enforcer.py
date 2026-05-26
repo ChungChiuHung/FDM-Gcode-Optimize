@@ -1,4 +1,5 @@
 import re
+import warnings
 from typing import Tuple
 
 def get_hardware_bounds(header_text: str) -> Tuple[float, float, float, float, float]:
@@ -33,8 +34,12 @@ def get_hardware_bounds(header_text: str) -> Tuple[float, float, float, float, f
             bed_max_z = float(height_match.group(1))
             
     except Exception:
-        # 防禦性編程：若正則解析或浮點數轉換失敗，靜默攔截並退回 256.0 的預設安全尺寸
-        pass
+        warnings.warn(
+            "bounds_enforcer: failed to parse printable_area; using 256mm defaults. "
+            "Verify printer config header.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
 
     # 3. 加入機台機構寬限值 (Tolerance)：
     # - 切線刀 (Filament Cutter) 觸發位置在 X 軸最左側，給予 X-5 寬容度

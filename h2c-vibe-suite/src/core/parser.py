@@ -8,6 +8,10 @@ class GCodeParser:
     # on every parsed line, which dominates CPU time for >50 MB G-code files.
     TOKEN_PATTERN = re.compile(r'([A-Z])([-+]?\d*\.?\d+)')
 
+    # OOM protection: cap header accumulation on malformed files that never
+    # emit a body-start marker (EXECUTABLE_BLOCK_START / LAYER_CHANGE).
+    MAX_HEADER_LINES = 5000
+
     def __init__(self):
         self.current_x, self.current_y, self.current_z = 0.0, 0.0, 0.0
         self.current_e, self.current_f = 0.0, 0.0
@@ -33,7 +37,8 @@ class GCodeParser:
             for line in f:
                 line_s = line.strip()
                 if not self.in_body:
-                    self.header_lines.append(line)
+                    if len(self.header_lines) < self.MAX_HEADER_LINES:
+                        self.header_lines.append(line)
                     line_upper = line.upper()
                     
                     if "M82" in line_upper:
