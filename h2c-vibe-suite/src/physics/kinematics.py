@@ -67,6 +67,51 @@ class AntiResonanceBrake:
         return "\n".join(brake_gcode)
 
 
+def generate_contour_wipe(last_extrude_move: dict, wipe_dist: float = 2.0, travel_f: int = 12000) -> str:
+    """
+    Generate a tangential contour-wipe G-code sequence to reduce stringing on
+    holes, small circles, and tight perimeters.
+
+    Strategy:
+      1. Micro-lift Z (relative) using the previously-unused KinematicProfile
+         constants to clear the just-printed surface.
+      2. Backtrack along the reverse vector of the last extrusion line,
+         capped at the actual line length so we never overshoot the start point.
+      3. Return to absolute positioning, ready for the main travel move.
+
+    Returns "" when the move geometry is invalid or the line is too short to
+    wipe meaningfully (< 0.1 mm).
+    """
+    if not last_extrude_move.get('has_xy', True):
+        return ""
+
+    sx, sy = last_extrude_move['start'][0], last_extrude_move['start'][1]
+    ex, ey = last_extrude_move['end'][0],   last_extrude_move['end'][1]
+
+    line_len = math.hypot(ex - sx, ey - sy)
+    if line_len < 0.1:
+        return ""
+
+    # Reverse unit vector (end → start direction)
+    rx, ry = (sx - ex) / line_len, (sy - ey) / line_len
+
+    # Cap backtrack distance at the actual line length
+    actual_dist = min(wipe_dist, line_len)
+    wx = ex + rx * actual_dist
+    wy = ey + ry * actual_dist
+
+    lift = KinematicProfile.MICRO_LIFT_MM
+    lift_f = int(KinematicProfile.Z_LIFT_SPEED_MM_MIN)
+
+    return (
+        f"; --- AI Contour Wipe (Anti-String | Micro-Lift {lift}mm) ---\n"
+        f"G91 ; relative\n"
+        f"G1 Z{lift:.2f} F{lift_f} ; micro-lift off surface\n"
+        f"G90 ; absolute\n"
+        f"G1 X{wx:.3f} Y{wy:.3f} F{travel_f} ; backtrack along contour\n"
+    )
+
+
 def calculate_inertia_dampening(feature: str) -> int:
     """
     Return the M204 acceleration (mm/s²) appropriate for a G-code feature.

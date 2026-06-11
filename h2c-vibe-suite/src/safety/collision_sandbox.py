@@ -17,7 +17,9 @@ class GCodeCollisionChecker:
     ENDPOINT_TOLERANCE = 0.05    # mm: 排除接縫擦拭與端點重合的誤判
     ZHOP_TOLERANCE = 0.02       # mm: 判定安全抬刀的高度閾值
     MIN_LAYER_HEIGHT = 0.15     # mm: 忽略機台初始清理線
-    MICRO_GLIDE_LIMIT = 3.0     # mm: 與 ZHopInjector 保持一致的 3.0mm 滑行容忍度    CELL_SIZE = 10.0            # mm: spatial-hash grid cell side length    
+    MICRO_GLIDE_LIMIT = 3.0     # mm: 與 ZHopInjector 保持一致的 3.0mm 滑行容忍度
+    CELL_SIZE = 10.0            # mm: spatial-hash grid cell side length
+
     def __init__(self):
         self.reset_state()
 
@@ -195,7 +197,7 @@ class GCodeCollisionChecker:
                                 # 支援 Z 軸噴嘴清理後的下降
                                 if abs(nz - self.current_layer_z) > 0.05:
                                     if nz > self.current_layer_z + 0.05 or nz < self.current_layer_z - 2.0:
-                                        self.extruded_lines.clear()
+                                        self._grid.clear()
                                         self.current_layer_z = nz
                                         if not self.is_new_layer:
                                             self.layer_num += 1

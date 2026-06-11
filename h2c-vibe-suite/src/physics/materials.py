@@ -70,32 +70,10 @@ def get_material_profile(filament_type: str, header_text: str = "") -> Dict[str,
         "label": filament_type
     }
 
-    # 1. 高黏性材料 (PETG, Nylon) - 易產生殼線與拉絲
-    if "PETG" in filament_type or "PA" in filament_type:
+    # 1. 纖維強化材料 (CF, GF, CARBON) - 注意噴嘴磨損 (must precede PETG/PA to avoid PA-CF misrouting)
+    if any(kw in filament_type for kw in ["CF", "GF", "CARBON", "GLASS"]):
         profile.update({
-            "z_hop": 0.6,               
-            "speed_multiplier": 0.9,     
-            "max_travel_speed": 18000,
-            "max_volumetric_speed": max_vol_speed or 10.0, # PETG 較黏稠，強制降低預設流量上限
-            "needs_uniform_speed": True, 
-            "needs_petg_wipe": "PETG" in filament_type,
-            "glass_transition_temp": 70 if "PETG" in filament_type else 90
-        })
-
-    # 2. 彈性材料 (TPU, TPE, FLEX) - 極易導致擠出機齒輪打滑卡料
-    elif any(kw in filament_type for kw in ["TPU", "TPE", "FLEX"]):
-        profile.update({
-            "z_hop": 0.8,               
-            "speed_multiplier": 0.5,     
-            "max_travel_speed": 12000,
-            "max_volumetric_speed": max_vol_speed or 3.2,   # TPU 物理極限，嚴格限制流量
-            "glass_transition_temp": 35  # TPU 不需要高溫床
-        })
-
-    # 3. 纖維強化材料 (CF, GF, CARBON) - 注意噴嘴磨損
-    elif any(kw in filament_type for kw in ["CF", "GF", "CARBON", "GLASS"]):
-        profile.update({
-            "z_hop": 0.2,               
+            "z_hop": 0.2,
             "speed_multiplier": 0.85,
             "max_travel_speed": 18000,
             "max_volumetric_speed": max_vol_speed or 8.0,   # 纖維導致熔體黏度飆升，降低流量上限
@@ -105,6 +83,28 @@ def get_material_profile(filament_type: str, header_text: str = "") -> Dict[str,
         print("[!] QUALITY ALERT: Abrasive Filament (CF/GF) detected.")
         print("[!] ACTION: Ensure HARDENED STEEL nozzle is installed to maintain DA accuracy.")
         print("="*50 + "\n")
+
+    # 2. 高黏性材料 (PETG, Nylon) - 易產生殼線與拉絲
+    elif "PETG" in filament_type or "PA" in filament_type:
+        profile.update({
+            "z_hop": 0.6,
+            "speed_multiplier": 0.9,
+            "max_travel_speed": 18000,
+            "max_volumetric_speed": max_vol_speed or 10.0, # PETG 較黏稠，強制降低預設流量上限
+            "needs_uniform_speed": True,
+            "needs_petg_wipe": "PETG" in filament_type,
+            "glass_transition_temp": 70 if "PETG" in filament_type else 90
+        })
+
+    # 3. 彈性材料 (TPU, TPE, FLEX) - 極易導致擠出機齒輪打滑卡料
+    elif any(kw in filament_type for kw in ["TPU", "TPE", "FLEX"]):
+        profile.update({
+            "z_hop": 0.8,
+            "speed_multiplier": 0.5,
+            "max_travel_speed": 12000,
+            "max_volumetric_speed": max_vol_speed or 3.2,   # TPU 物理極限，嚴格限制流量
+            "glass_transition_temp": 35  # TPU 不需要高溫床
+        })
 
     # 4. 高溫工程材料 (ABS, ASA)
     elif "ABS" in filament_type or "ASA" in filament_type:

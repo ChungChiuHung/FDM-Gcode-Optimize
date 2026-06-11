@@ -485,8 +485,12 @@
         let scene, camera, renderer, controls;
         let objectGroup = new THREE.Group();
         let nozzleMesh, plateMesh, gridHelper;
-        let parsedData = { layers: [], config: {}, header: {} };
+        let parsedData = { layerZs: new Float32Array(0), totalMoves: 0, config: {}, header: {} };
         let gcOffsetX = 0, gcOffsetY = 0, gcZOffset = 0;
+
+        // Helpers — replace old parsedData.layers references
+        function layerCount()         { return parsedData.layerZs ? parsedData.layerZs.length : 0; }
+        function currentLayerMaxIdx() { return parsedData.layerMoveCounts ? Math.max(0, (parsedData.layerMoveCounts[currentLayerIndex] || 0) - 1) : 0; }
 
         let globalMinF = Infinity;
         let globalMaxF = -Infinity;
@@ -586,6 +590,215 @@
         document.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
         document.getElementById('file-input').addEventListener('change', e => handleFile(e.target.files[0]));
 
+        // --- WEB WORKER: inline Blob parser ---
+        let gcodeWorker = null;
+        function terminateWorker() { if (gcodeWorker) { gcodeWorker.terminate(); gcodeWorker = null; } }
+
+        const WORKER_SRC = `
+'use strict';
+const RGB_TRAVEL  = [0.114, 0.306, 0.847];
+const RGB_EXTRUDE = [0.231, 0.510, 0.965];
+
+function parseFDM(lines) {
+    const config = {}, header = {};
+    const featureCounts = {};
+    let retractCount = 0, globalMinF = Infinity, globalMaxF = -Infinity;
+    let inHeader = false, inConfig = false;
+    for (let i = 0; i < lines.length; i++) {
+        const raw = lines[i].trim();
+        if (raw === '; HEADER_BLOCK_START'){inHeader=true;continue;}
+        if (raw === '; HEADER_BLOCK_END')  {inHeader=false;continue;}
+        if (raw === '; CONFIG_BLOCK_START'){inConfig=true;continue;}
+        if (raw === '; CONFIG_BLOCK_END')  {inConfig=false;continue;}
+        if (raw.startsWith(';')) {
+            const c=raw.slice(1).trim();
+            const hm=c.match(/^(.+?):\\s*(.+)$/); if(hm)header[hm[1].trim().toLowerCase()]=hm[2].trim();
+            const cm=c.match(/^([a-z0-9_]+)\\s*=\\s*(.+)$/i); if(cm)config[cm[1].toLowerCase()]=cm[2].trim();
+        }
+        if (i>400&&!inConfig&&!inHeader&&!raw.startsWith(';')) break;
+    }
+    const rawPos=[],rawType=[],rawFeat=[],rawF=[];
+    const layerStarts=[],layerCounts=[],layerZs_raw=[];
+    let x=0,y=0,z=0,e=0,f=3000,absPos=true,absE=false,lastEZ=-999;
+    let currentFeature='unknown', moveCount=0, layerMoveStart=0, currentLayerZ=0;
+    const featureSet=new Set();
+    for (let i=0;i<lines.length;i++){
+        const raw2=lines[i].trim();
+        if (raw2.startsWith(';')){
+            const fm=raw2.match(/;\\s*(?:FEATURE|TYPE)\\s*:?\\s*(.+)/i);
+            if(fm)currentFeature=fm[1].trim().toLowerCase();
+            continue;
+        }
+        const line=raw2.split(';')[0].trim().toUpperCase();
+        if(!line)continue;
+        const tok=line.split(/\\s+/),cmd=tok[0];
+        if(cmd==='G90'){absPos=true;continue;}
+        if(cmd==='G91'){absPos=false;continue;}
+        if(cmd==='M82'){absE=true;continue;}
+        if(cmd==='M83'){absE=false;continue;}
+        if(cmd==='G92'){tok.forEach(t=>{const v=parseFloat(t.slice(1));if(isNaN(v))return;if(t[0]==='E')e=v;if(t[0]==='X')x=v;if(t[0]==='Y')y=v;if(t[0]==='Z')z=v;});continue;}
+        if(cmd==='G0'||cmd==='G1'||cmd==='G2'||cmd==='G3'){
+            let nx=x,ny=y,nz=z,ne=e,nf=f,eDelta=0,hasE=false,i_arc=0,j_arc=0,hasArc=false;
+            tok.forEach(t=>{
+                const v=parseFloat(t.slice(1));if(isNaN(v))return;
+                if(t[0]==='X')nx=absPos?v:x+v; if(t[0]==='Y')ny=absPos?v:y+v;
+                if(t[0]==='Z')nz=absPos?v:z+v; if(t[0]==='F')nf=v;
+                if(t[0]==='I'){i_arc=v;hasArc=true;} if(t[0]==='J'){j_arc=v;hasArc=true;}
+                if(t[0]==='E'){hasE=true;if(absE){eDelta=v-e;ne=v;}else{eDelta=v;ne=e+v;}}
+            });
+            f=nf;
+            const isEx=hasE&&eDelta>0,isRet=hasE&&eDelta<0;
+            if(isEx){globalMinF=Math.min(globalMinF,f);globalMaxF=Math.max(globalMaxF,f);}
+            if(isEx&&Math.abs(nz-lastEZ)>0.01){
+                if(moveCount>layerMoveStart){layerStarts.push(layerMoveStart);layerCounts.push(moveCount-layerMoveStart);layerZs_raw.push(currentLayerZ);}
+                layerMoveStart=moveCount;currentLayerZ=nz;lastEZ=nz;
+            }
+            const mtype=isEx?1:0;featureSet.add(currentFeature);
+            if((cmd==='G2'||cmd==='G3')&&hasArc){
+                const cx=x+i_arc,cy=y+j_arc;
+                let sa=Math.atan2(y-cy,x-cx),ea=Math.atan2(ny-cy,nx-cx);
+                if(cmd==='G2'&&ea>sa)ea-=Math.PI*2; if(cmd==='G3'&&ea<sa)ea+=Math.PI*2;
+                const radius=Math.hypot(i_arc,j_arc),arcLen=radius*Math.abs(ea-sa);
+                const segs=Math.max(6,Math.min(64,Math.ceil(arcLen)));
+                let lx=x,ly=y,lz=z;
+                for(let s=1;s<=segs;s++){
+                    const tp=s/segs,ang=sa+(ea-sa)*tp;
+                    const px=cx+radius*Math.cos(ang),py=cy+radius*Math.sin(ang),pz=z+(nz-z)*tp;
+                    rawPos.push(lx,ly,lz,px,py,pz);rawType.push(mtype);rawFeat.push(currentFeature);rawF.push(f);
+                    lx=px;ly=py;lz=pz;moveCount++;
+                }
+                if(isEx)featureCounts[currentFeature]=(featureCounts[currentFeature]||0)+1;
+            } else {
+                const hasXY=(nx!==x||ny!==y),hasZm=Math.abs(nz-z)>0.001;
+                if(hasXY||hasZm){
+                    rawPos.push(x,y,z,nx,ny,nz);rawType.push(mtype);rawFeat.push(currentFeature);rawF.push(f);
+                    if(isEx)featureCounts[currentFeature]=(featureCounts[currentFeature]||0)+1;
+                    moveCount++;
+                }
+            }
+            if(isRet)retractCount++;
+            x=nx;y=ny;z=nz;e=ne;
+        }
+    }
+    if(moveCount>layerMoveStart){layerStarts.push(layerMoveStart);layerCounts.push(moveCount-layerMoveStart);layerZs_raw.push(currentLayerZ);}
+    let minX=Infinity,minY=Infinity;
+    for(let i=0;i<moveCount;i++){if(rawType[i]===1){const pi=i*6;minX=Math.min(minX,rawPos[pi],rawPos[pi+3]);minY=Math.min(minY,rawPos[pi+1],rawPos[pi+4]);}}
+    if(!isFinite(minX)){minX=0;minY=0;}
+    const gcOffsetX=minX,gcOffsetY=minY,gcZOffset=0;
+    const positions=new Float32Array(moveCount*6),colors=new Float32Array(moveCount*6);
+    const moveTypes=new Uint8Array(moveCount),moveFeedrates=new Float32Array(moveCount);
+    const featureList=Array.from(featureSet);
+    const featureIndex={};featureList.forEach((f2,i)=>featureIndex[f2]=i);
+    const moveFeatureIds=new Uint8Array(moveCount);
+    for(let i=0;i<moveCount;i++){
+        const pi=i*6;
+        const x1=rawPos[pi],y1=rawPos[pi+1],z1=rawPos[pi+2],x2=rawPos[pi+3],y2=rawPos[pi+4],z2=rawPos[pi+5];
+        positions[pi]=x1-gcOffsetX; positions[pi+1]=z1; positions[pi+2]=-(y1-gcOffsetY);
+        positions[pi+3]=x2-gcOffsetX; positions[pi+4]=z2; positions[pi+5]=-(y2-gcOffsetY);
+        const mt=rawType[i];moveTypes[i]=mt;moveFeedrates[i]=rawF[i];moveFeatureIds[i]=featureIndex[rawFeat[i]]||0;
+        const rgb=mt===0?RGB_TRAVEL:RGB_EXTRUDE;
+        colors[pi]=rgb[0];colors[pi+1]=rgb[1];colors[pi+2]=rgb[2];
+        colors[pi+3]=rgb[0];colors[pi+4]=rgb[1];colors[pi+5]=rgb[2];
+    }
+    return {positions,colors,layerOffsets:new Int32Array(layerStarts),layerMoveCounts:new Int32Array(layerCounts),layerZs:new Float32Array(layerZs_raw),moveTypes,moveFeatureIds,moveFeedrates,featureList,config,header,featureCounts,retractCount,globalMinF:isFinite(globalMinF)?globalMinF:0,globalMaxF:isFinite(globalMaxF)?globalMaxF:0,gcOffsetX,gcOffsetY,gcZOffset,totalMoves:moveCount};
+}
+
+function parseCNC(lines) {
+    const config={},header={};
+    const featureCounts={};
+    let globalMinF=Infinity,globalMaxF=-Infinity;
+    const cncInfo={programNumber:'',toolChanges:0,spindleSpeeds:[],workOffset:'G54'};
+    const rawPos=[],rawType=[],rawFeat=[],rawF=[];
+    const layerStarts=[],layerCounts=[],layerZs_raw=[];
+    let x=0,y=0,z=0,f=1000,absPos=true,modalMotion='G0',lastZ=99999,moveCount=0,layerMoveStart=0,currentLayerZ=0;
+    const featureSet=new Set(['rapid','cutting']);
+    for(let i=0;i<lines.length;i++){
+        let raw=lines[i].trim().replace(/\\([^)]*\\)/g,'').trim().split(';')[0].trim().replace(/^N\\d+\\s*/i,'').trim();
+        const om=raw.match(/^O(\\d+)/i); if(om){cncInfo.programNumber=om[1];raw=raw.slice(om[0].length).trim();}
+        if(!raw||raw==='%')continue;
+        const tok=raw.toUpperCase().split(/\\s+/);
+        let nx=x,ny=y,nz=z,nf=f,hasX=false,hasY=false,hasZ=false,i_arc=0,j_arc=0,hasArc=false,motionCmd=null;
+        for(const t of tok){
+            if(!t)continue;const v=parseFloat(t.slice(1));
+            switch(t[0]){
+                case 'G':{const g=parseInt(t.slice(1));if(g===0){modalMotion='G0';motionCmd='G0';}else if(g===1){modalMotion='G1';motionCmd='G1';}else if(g===2){modalMotion='G2';motionCmd='G2';}else if(g===3){modalMotion='G3';motionCmd='G3';}else if(g===90)absPos=true;else if(g===91)absPos=false;else if(g>=54&&g<=59)cncInfo.workOffset='G'+g;break;}
+                case 'M':{const m=parseInt(t.slice(1));if(m===3||m===4);else if(m===5);else if(m===6)cncInfo.toolChanges++;break;}
+                case 'S':if(!isNaN(v))cncInfo.spindleSpeeds.push(v);break;
+                case 'X':if(!isNaN(v)){nx=absPos?v:x+v;hasX=true;}break;
+                case 'Y':if(!isNaN(v)){ny=absPos?v:y+v;hasY=true;}break;
+                case 'Z':if(!isNaN(v)){nz=absPos?v:z+v;hasZ=true;}break;
+                case 'F':if(!isNaN(v))nf=v;break;
+                case 'I':if(!isNaN(v)){i_arc=v;hasArc=true;}break;
+                case 'J':if(!isNaN(v)){j_arc=v;hasArc=true;}break;
+            }
+        }
+        f=nf;
+        if(!hasX&&!hasY&&!hasZ){x=nx;y=ny;z=nz;continue;}
+        const cmd=motionCmd||modalMotion;
+        const isRapid=(cmd==='G0'),mtype=isRapid?0:1,feature=isRapid?'rapid':'cutting';
+        if(!isRapid){globalMinF=Math.min(globalMinF,f);globalMaxF=Math.max(globalMaxF,f);}
+        if(Math.abs(nz-lastZ)>0.001){
+            if(moveCount>layerMoveStart){layerStarts.push(layerMoveStart);layerCounts.push(moveCount-layerMoveStart);layerZs_raw.push(currentLayerZ);}
+            layerMoveStart=moveCount;currentLayerZ=nz;lastZ=nz;
+        }
+        if((cmd==='G2'||cmd==='G3')&&hasArc){
+            const cx=x+i_arc,cy=y+j_arc;
+            let sa=Math.atan2(y-cy,x-cx),ea=Math.atan2(ny-cy,nx-cx);
+            if(cmd==='G2'&&ea>sa)ea-=Math.PI*2; if(cmd==='G3'&&ea<sa)ea+=Math.PI*2;
+            const radius=Math.hypot(i_arc,j_arc),segs=Math.max(6,Math.min(64,Math.ceil(radius*Math.abs(ea-sa))));
+            let lx=x,ly=y,lz=z;
+            for(let s=1;s<=segs;s++){
+                const tp=s/segs,ang=sa+(ea-sa)*tp;
+                const px=cx+radius*Math.cos(ang),py=cy+radius*Math.sin(ang),pz=z+(nz-z)*tp;
+                rawPos.push(lx,ly,lz,px,py,pz);rawType.push(mtype);rawFeat.push(feature);rawF.push(f);
+                lx=px;ly=py;lz=pz;moveCount++;
+            }
+        } else {
+            rawPos.push(x,y,z,nx,ny,nz);rawType.push(mtype);rawFeat.push(feature);rawF.push(f);moveCount++;
+        }
+        if(!isRapid)featureCounts[feature]=(featureCounts[feature]||0)+1;
+        x=nx;y=ny;z=nz;
+    }
+    if(moveCount>layerMoveStart){layerStarts.push(layerMoveStart);layerCounts.push(moveCount-layerMoveStart);layerZs_raw.push(currentLayerZ);}
+    let minX=Infinity,minY=Infinity,minZgc=Infinity;
+    for(let i=0;i<rawPos.length;i+=6){minX=Math.min(minX,rawPos[i],rawPos[i+3]);minY=Math.min(minY,rawPos[i+1],rawPos[i+4]);minZgc=Math.min(minZgc,rawPos[i+2],rawPos[i+5]);}
+    if(!isFinite(minX)){minX=0;minY=0;minZgc=0;}
+    const gcOffsetX=minX,gcOffsetY=minY,gcZOffset=minZgc;
+    const positions=new Float32Array(moveCount*6),colors=new Float32Array(moveCount*6);
+    const moveTypes=new Uint8Array(moveCount),moveFeedrates=new Float32Array(moveCount);
+    const featureList=Array.from(featureSet);
+    const featureIndex={};featureList.forEach((f2,i)=>featureIndex[f2]=i);
+    const moveFeatureIds=new Uint8Array(moveCount);
+    for(let i=0;i<moveCount;i++){
+        const pi=i*6;
+        const x1=rawPos[pi],y1=rawPos[pi+1],z1=rawPos[pi+2],x2=rawPos[pi+3],y2=rawPos[pi+4],z2=rawPos[pi+5];
+        positions[pi]=x1-gcOffsetX; positions[pi+1]=z1-minZgc; positions[pi+2]=-(y1-gcOffsetY);
+        positions[pi+3]=x2-gcOffsetX; positions[pi+4]=z2-minZgc; positions[pi+5]=-(y2-gcOffsetY);
+        const mt=rawType[i];moveTypes[i]=mt;moveFeedrates[i]=rawF[i];moveFeatureIds[i]=featureIndex[rawFeat[i]]||0;
+        const rgb=mt===0?RGB_TRAVEL:RGB_EXTRUDE;
+        colors[pi]=rgb[0];colors[pi+1]=rgb[1];colors[pi+2]=rgb[2];
+        colors[pi+3]=rgb[0];colors[pi+4]=rgb[1];colors[pi+5]=rgb[2];
+    }
+    return {positions,colors,layerOffsets:new Int32Array(layerStarts),layerMoveCounts:new Int32Array(layerCounts),layerZs:new Float32Array(layerZs_raw),moveTypes,moveFeatureIds,moveFeedrates,featureList,config,header,featureCounts,retractCount:0,globalMinF:isFinite(globalMinF)?globalMinF:0,globalMaxF:isFinite(globalMaxF)?globalMaxF:0,gcOffsetX,gcOffsetY,gcZOffset,totalMoves:moveCount,cncInfo};
+}
+
+self.onmessage = function(ev) {
+    const {gcode,isCNC} = ev.data;
+    self.postMessage({type:'progress', msg:'Splitting lines…'});
+    const lines = gcode.split(/\\r?\\n/);
+    self.postMessage({type:'progress', msg: isCNC ? 'Parsing CNC G-code…' : 'Parsing FDM G-code…'});
+    const result = isCNC ? parseCNC(lines) : parseFDM(lines);
+    self.postMessage({type:'progress', msg:'Transferring geometry…'});
+    self.postMessage(
+        {type:'done', ...result, isCNC},
+        [result.positions.buffer, result.colors.buffer,
+         result.layerOffsets.buffer, result.layerMoveCounts.buffer,
+         result.layerZs.buffer, result.moveTypes.buffer,
+         result.moveFeatureIds.buffer, result.moveFeedrates.buffer]
+    );
+};
+`;
+
         function handleFile(file) {
             if (!file) return;
             const nm = file.name.toLowerCase();
@@ -593,15 +806,88 @@
             isCNC = nm.endsWith('.nc');
             document.getElementById('file-name-display').textContent = (isCNC ? '[CNC] ' : '') + file.name;
             loadingOverlay.classList.remove('hidden');
-            setTimeout(() => {
-                const reader = new FileReader();
-                reader.onload = ev => isCNC ? parseCNCGCode(ev.target.result) : parseGCode(ev.target.result);
-                reader.readAsText(file);
-            }, 40);
+            loadingProgress.textContent = 'Reading file…';
+            terminateWorker();
+            const reader = new FileReader();
+            reader.onload = ev2 => {
+                loadingProgress.textContent = 'Launching parser…';
+                const blob = new Blob([WORKER_SRC], {type:'application/javascript'});
+                gcodeWorker = new Worker(URL.createObjectURL(blob));
+                gcodeWorker.onmessage = handleWorkerMessage;
+                gcodeWorker.postMessage({gcode: ev2.target.result, isCNC});
+            };
+            reader.readAsText(file);
         }
 
-        // --- G-CODE PARSING ---
+        function handleWorkerMessage(ev) {
+            const msg = ev.data;
+            if (msg.type === 'progress') {
+                loadingProgress.textContent = msg.msg;
+            } else if (msg.type === 'done') {
+                applyWorkerResult(msg);
+                loadingOverlay.classList.add('hidden');
+            }
+        }
+
+        function applyWorkerResult(result) {
+            globalMinF = result.globalMinF;
+            globalMaxF = result.globalMaxF;
+            gcOffsetX  = result.gcOffsetX;
+            gcOffsetY  = result.gcOffsetY;
+            gcZOffset  = result.gcZOffset;
+            parsedData = {
+                positions:      result.positions,
+                colors:         result.colors,
+                layerOffsets:   result.layerOffsets,
+                layerMoveCounts:result.layerMoveCounts,
+                layerZs:        result.layerZs,
+                moveTypes:      result.moveTypes,
+                moveFeatureIds: result.moveFeatureIds,
+                moveFeedrates:  result.moveFeedrates,
+                featureList:    result.featureList,
+                config:         result.config,
+                header:         result.header,
+                featureCounts:  result.featureCounts,
+                retractCount:   result.retractCount,
+                totalMoves:     result.totalMoves,
+                cncInfo:        result.cncInfo || null,
+            };
+            populateUI();
+            const n = parsedData.layerZs.length;
+            if (n > 0) { layerSlider.max = n-1; layerSlider.value = n-1; setLayer(n-1); }
+        }
+
+        // Rebuild parsedData.colors in-place for a given color mode
+        function featureToRgbArray(feat) {
+            const hex = featureToHex(feat);
+            return [parseInt(hex.slice(1,3),16)/255, parseInt(hex.slice(3,5),16)/255, parseInt(hex.slice(5,7),16)/255];
+        }
+        function feedrateToRgbArray(f) {
+            if (globalMaxF <= globalMinF) return [0.231, 0.510, 0.965];
+            const t = Math.min(Math.max((f - globalMinF) / (globalMaxF - globalMinF), 0), 1);
+            let r, g, b;
+            if (t < 0.5) { const s=t*2; r=0.231+(0.133-0.231)*s; g=0.510+(0.827-0.510)*s; b=0.965+(0.933-0.965)*s; }
+            else         { const s=(t-0.5)*2; r=0.133+(0.937-0.133)*s; g=0.827+(0.267-0.827)*s; b=0.933+(0.267-0.933)*s; }
+            return [r, g, b];
+        }
+        function rebuildColors(mode) {
+            if (!parsedData.positions) return;
+            const n = parsedData.totalMoves, colors = parsedData.colors;
+            for (let i = 0; i < n; i++) {
+                const pi = i * 6, mt = parsedData.moveTypes[i];
+                let rgb;
+                if (mode === 'feature' && mt === 1) rgb = featureToRgbArray(parsedData.featureList[parsedData.moveFeatureIds[i]]);
+                else if (mode === 'speed' && mt === 1) rgb = feedrateToRgbArray(parsedData.moveFeedrates[i]);
+                else if (mt === 0) rgb = [0.114, 0.306, 0.847];
+                else               rgb = [0.231, 0.510, 0.965];
+                colors[pi]=rgb[0]; colors[pi+1]=rgb[1]; colors[pi+2]=rgb[2];
+                colors[pi+3]=rgb[0]; colors[pi+4]=rgb[1]; colors[pi+5]=rgb[2];
+            }
+        }
+
+        // Parsing is now handled in the inline Web Worker above.
         function parseGCode(gcode) {
+            return; // dead — worker handles parsing
             parsedData = { layers: [], config: {}, header: {}, retractCount: 0, featureCounts: {} };
             globalMinF = Infinity; globalMaxF = -Infinity;
             const lines = gcode.split('\n');
@@ -866,18 +1152,18 @@
 
         function populateCNCUI() {
             const ci = parsedData.cncInfo || {};
-            const totalMoves = parsedData.layers.reduce((a,l)=>a+l.moves.length, 0);
+            const totalMoves = parsedData.totalMoves || 0;
             setLbl('lbl-print-time','Program #');    setLbl('lbl-layers','Depth Levels');
             setLbl('lbl-filament-len','Feedrate');   setLbl('lbl-weight','Tool Changes');
             setLbl('lbl-maxz','Max Depth');          setLbl('lbl-slicer','Machine Type');
             setLbl('lbl-retract-count','Spindle RPM'); setLbl('lbl-top-feature','Work Offset');
             setText('s-print-time', ci.programNumber ? 'O'+ci.programNumber : '—');
-            setText('s-layers',     parsedData.layers.length);
+            setText('s-layers',     layerCount());
             setText('s-moves',      totalMoves.toLocaleString());
             const fMinS = isFinite(globalMinF) ? (globalMinF/60).toFixed(1)+'–'+(globalMaxF/60).toFixed(1)+' mm/s' : '—';
             setText('s-filament-len', fMinS);
             setText('s-weight',     ci.toolChanges ?? '—');
-            const allZ = parsedData.layers.map(l=>l.z);
+            const allZ = Array.from(parsedData.layerZs || []);
             setText('s-maxz',       allZ.length ? Math.min(...allZ).toFixed(3)+' mm' : '—');
             setText('s-slicer',     'CNC Mill / Lathe');
             const uspd = [...new Set(ci.spindleSpeeds||[])].sort((a,b)=>b-a);
@@ -898,11 +1184,11 @@
             setLbl('lbl-maxz','Max Z Height');      setLbl('lbl-slicer','Slicer');
             setLbl('lbl-retract-count','Retractions'); setLbl('lbl-top-feature','Top Feature');
             const cfg=parsedData.config, hdr=parsedData.header;
-            const totalMoves=parsedData.layers.reduce((a,l)=>a+l.moves.length,0);
+            const totalMoves = parsedData.totalMoves || 0;
 
             // Stats
             setText('s-print-time', hdr['model printing time']||hdr['total estimated time']||cfg['model_printing_time']||'—');
-            setText('s-layers',     parsedData.layers.length);
+            setText('s-layers',     layerCount());
             setText('s-moves',      totalMoves.toLocaleString());
             setText('s-filament-len', fmtVal(cfg['total filament length [mm]']||cfg['filament_length'],'mm'));
             setText('s-weight',     fmtVal(cfg['total filament weight [g]']||cfg['filament_weight'],'g'));
@@ -1056,12 +1342,10 @@
         function buildFeatureLegend(){
             const el=document.getElementById('feature-legend-items');
             if(!el)return; el.innerHTML='';
-            const fc=parsedData.featureCounts||{};
-            const seen=new Set(Object.keys(fc).map(k=>k.toLowerCase()));
-            parsedData.layers.forEach(l=>l.moves.forEach(m=>{ if(m.type==='travel')seen.add('travel'); }));
+            const seen=new Set(Object.keys(parsedData.featureCounts||{}).map(k=>k.toLowerCase()));
+            if(parsedData.moveTypes){for(let i=0;i<parsedData.moveTypes.length;i++){if(parsedData.moveTypes[i]===0){seen.add('travel');break;}}}
             FEATURE_COLOR_MAP.forEach(fcm=>{
-                const match=[...seen].some(s=>fcm.keys.some(k=>s.includes(k)));
-                if(!match)return;
+                if(![...seen].some(s=>fcm.keys.some(k=>s.includes(k))))return;
                 const row=document.createElement('div');
                 row.className='flex items-center gap-1.5';
                 row.innerHTML=`<div class="feat-dot" style="background:${fcm.hex}"></div><span class="text-[10px] text-slate-300">${fcm.label}</span>`;
@@ -1072,15 +1356,15 @@
         function setLayer(idx){
             stopAnimation();
             currentLayerIndex=parseInt(idx);
-            const layer=parsedData.layers[currentLayerIndex];
-            if(!layer)return;
-            layerLabel.textContent=currentLayerIndex;
-            layerZLabel.textContent=`z=${layer.z.toFixed(2)}`;
-            layerSlider.value=currentLayerIndex;
-            progressSlider.max=layer.moves.length-1;
-            progressSlider.value=layer.moves.length-1;
-            moveTotal.textContent=layer.moves.length;
-            setPathProgress(layer.moves.length-1);
+            const cnt = parsedData.layerMoveCounts ? (parsedData.layerMoveCounts[currentLayerIndex]||0) : 0;
+            const z   = parsedData.layerZs         ? (parsedData.layerZs[currentLayerIndex]||0)         : 0;
+            layerLabel.textContent  = currentLayerIndex;
+            layerZLabel.textContent = `z=${z.toFixed(2)}`;
+            layerSlider.value       = currentLayerIndex;
+            progressSlider.max      = Math.max(0, cnt-1);
+            progressSlider.value    = Math.max(0, cnt-1);
+            moveTotal.textContent   = cnt;
+            setPathProgress(Math.max(0, cnt-1));
         }
 
         function setPathProgress(uptoIndex){
@@ -1093,51 +1377,84 @@
         function redrawScene(){
             while(objectGroup.children.length>1) objectGroup.remove(objectGroup.children[1]);
             nozzleMesh.visible=false;
-            const showTravels  =document.getElementById('toggle-travels').checked;
-            const showAllLayers=document.getElementById('toggle-all-layers').checked;
-            const layerStart   =showAllLayers?0:currentLayerIndex;
+            if(!parsedData.positions || layerCount()===0) return;
 
-            for(let li=layerStart;li<=currentLayerIndex;li++){
-                const layer=parsedData.layers[li]; if(!layer)continue;
-                const isCur=(li===currentLayerIndex);
-                const upTo=isCur?currentPathIndex:layer.moves.length-1;
-                const pts=[],cols=[];
+            const showTravels   = document.getElementById('toggle-travels').checked;
+            const showAllLayers = document.getElementById('toggle-all-layers').checked;
+            const layerStart    = showAllLayers ? 0 : currentLayerIndex;
 
-                for(let i=0;i<=upTo;i++){
-                    const m=layer.moves[i];
-                    if(!showTravels&&m.type==='travel')continue;
-                    pts.push(m.x1,m.y1,m.z1,m.x2,m.y2,m.z2);
-                    const col=getColorForMove(m,isCur);
-                    cols.push(col.r,col.g,col.b,col.r,col.g,col.b);
-                    if(isCur&&i===upTo){ nozzleMesh.position.set(m.x2,m.y2,m.z2); nozzleMesh.visible=true; updateHUD(m); }
+            // Past layers — single draw call, dimmed (opacity 0.35)
+            if(layerStart < currentLayerIndex){
+                const ptsPast=[],colsPast=[];
+                for(let li=layerStart;li<currentLayerIndex;li++){
+                    const off=parsedData.layerOffsets[li], cnt=parsedData.layerMoveCounts[li];
+                    for(let i=0;i<cnt;i++){
+                        const mi=off+i;
+                        if(!showTravels&&parsedData.moveTypes[mi]===0)continue;
+                        const pi=mi*6;
+                        const r=parsedData.colors[pi],g=parsedData.colors[pi+1],b=parsedData.colors[pi+2];
+                        ptsPast.push(parsedData.positions[pi],parsedData.positions[pi+1],parsedData.positions[pi+2],
+                                     parsedData.positions[pi+3],parsedData.positions[pi+4],parsedData.positions[pi+5]);
+                        colsPast.push(r,g,b,r,g,b);
+                    }
                 }
-                if(pts.length>0){
+                if(ptsPast.length>0){
                     const geo=new THREE.BufferGeometry();
-                    geo.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
-                    geo.setAttribute('color',   new THREE.Float32BufferAttribute(cols,3));
-                    objectGroup.add(new THREE.LineSegments(geo,
-                        new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:isCur?1.0:0.35})));
+                    geo.setAttribute('position',new THREE.Float32BufferAttribute(ptsPast,3));
+                    geo.setAttribute('color',   new THREE.Float32BufferAttribute(colsPast,3));
+                    objectGroup.add(new THREE.LineSegments(geo,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:0.35})));
                 }
+            }
+
+            // Current layer — full opacity, up to currentPathIndex
+            const ptsCur=[],colsCur=[];
+            const off=parsedData.layerOffsets[currentLayerIndex]||0;
+            const cnt=parsedData.layerMoveCounts[currentLayerIndex]||0;
+            const upTo=Math.min(currentPathIndex+1,cnt);
+            let lastMi=-1;
+            for(let i=0;i<upTo;i++){
+                const mi=off+i;
+                if(!showTravels&&parsedData.moveTypes[mi]===0)continue;
+                const pi=mi*6;
+                const r=parsedData.colors[pi],g=parsedData.colors[pi+1],b=parsedData.colors[pi+2];
+                ptsCur.push(parsedData.positions[pi],parsedData.positions[pi+1],parsedData.positions[pi+2],
+                             parsedData.positions[pi+3],parsedData.positions[pi+4],parsedData.positions[pi+5]);
+                colsCur.push(r,g,b,r,g,b);
+                lastMi=mi;
+            }
+            if(ptsCur.length>0){
+                const geo=new THREE.BufferGeometry();
+                geo.setAttribute('position',new THREE.Float32BufferAttribute(ptsCur,3));
+                geo.setAttribute('color',   new THREE.Float32BufferAttribute(colsCur,3));
+                objectGroup.add(new THREE.LineSegments(geo,new THREE.LineBasicMaterial({vertexColors:true})));
+            }
+            if(lastMi>=0){
+                const pi3=lastMi*6+3;
+                nozzleMesh.position.set(parsedData.positions[pi3],parsedData.positions[pi3+1],parsedData.positions[pi3+2]);
+                nozzleMesh.visible=true;
+                updateHUD(lastMi);
             }
         }
 
-        function updateHUD(m){
-            if(!m)return;
-            const typeLabel=isCNC
-                ? (m.type==='extrude'?'Cut':'Rapid')
-                : (m.type==='extrude'?'Extrude':m.type==='retract'?'Retract':'Travel');
-            const typeColor=m.type==='extrude'?'#f97316':m.type==='retract'?'#d946ef':'#1d4ed8';
+        function updateHUD(mi){
+            if(mi<0||!parsedData.moveTypes)return;
+            const mt   = parsedData.moveTypes[mi];
+            const feat = parsedData.featureList[parsedData.moveFeatureIds[mi]]||'unknown';
+            const f    = parsedData.moveFeedrates[mi];
+            const pi   = mi*6;
+            const pos  = parsedData.positions;
+            const typeLabel=isCNC?(mt===1?'Cut':'Rapid'):(mt===1?'Extrude':mt===2?'Retract':'Travel');
+            const typeColor=mt===1?'#f97316':mt===2?'#d946ef':'#1d4ed8';
             document.getElementById('hud-dot').style.background=typeColor;
             document.getElementById('hud-type').textContent=typeLabel;
-            const feat=m.feature||'unknown';
             document.getElementById('hud-feat-dot').style.background=featureToHex(feat);
             document.getElementById('hud-feature').textContent=feat==='unknown'?'—':feat;
-            document.getElementById('hud-f').textContent=`${(m.f/60).toFixed(1)} mm/s`;
-            document.getElementById('hud-x').textContent=(m.x2+gcOffsetX).toFixed(2);
-            document.getElementById('hud-y').textContent=(gcOffsetY-m.z2).toFixed(2);
-            document.getElementById('hud-z').textContent=(m.y2+gcZOffset).toFixed(2);
+            document.getElementById('hud-f').textContent=`${(f/60).toFixed(1)} mm/s`;
+            document.getElementById('hud-x').textContent=(pos[pi+3]+gcOffsetX).toFixed(2);
+            document.getElementById('hud-y').textContent=(gcOffsetY-pos[pi+5]).toFixed(2);
+            document.getElementById('hud-z').textContent=(pos[pi+4]+gcZOffset).toFixed(2);
             document.getElementById('hud-idx').textContent=currentPathIndex;
-            document.getElementById('hud-total').textContent=parsedData.layers[currentLayerIndex]?.moves.length??0;
+            document.getElementById('hud-total').textContent=parsedData.layerMoveCounts?parsedData.layerMoveCounts[currentLayerIndex]||0:0;
         }
 
         // --- TABS ---
@@ -1153,7 +1470,7 @@
         // --- CONTROLS ---
         layerSlider.addEventListener('input',    e=>setLayer(e.target.value));
         progressSlider.addEventListener('input', e=>{ stopAnimation(); setPathProgress(e.target.value); });
-        document.getElementById('btn-layer-up').addEventListener('click',()=>{ if(currentLayerIndex+1<parsedData.layers.length)setLayer(currentLayerIndex+1); });
+        document.getElementById('btn-layer-up').addEventListener('click',()=>{ if(currentLayerIndex+1<layerCount())setLayer(currentLayerIndex+1); });
         document.getElementById('btn-layer-down').addEventListener('click',()=>{ if(currentLayerIndex-1>=0)setLayer(currentLayerIndex-1); });
         ['toggle-travels','toggle-all-layers'].forEach(id=>
             document.getElementById(id).addEventListener('change',()=>{ redrawScene(); })
@@ -1165,7 +1482,8 @@
                 btn.classList.add('active');
                 document.getElementById('speed-legend').classList.toggle('hidden', colorMode!=='speed');
                 document.getElementById('feature-legend').classList.toggle('hidden', colorMode!=='feature');
-                if(colorMode==='feature'&&parsedData.layers.length) buildFeatureLegend();
+                rebuildColors(colorMode);
+                if(colorMode==='feature'&&layerCount()) buildFeatureLegend();
                 redrawScene();
             });
         });
@@ -1173,7 +1491,7 @@
         // --- PLAYBACK ---
         function togglePlay(){
             if(isPlaying){stopAnimation();return;}
-            const max=parsedData.layers[currentLayerIndex]?.moves.length-1??0;
+            const max=currentLayerMaxIdx();
             if(currentPathIndex>=max)currentPathIndex=0;
             isPlaying=true; playIcon.setAttribute('data-lucide','pause'); lucide.createIcons();
             playAccum=0; playLoop();
@@ -1185,7 +1503,7 @@
         }
         function playLoop(){
             if(!isPlaying)return;
-            const max=parsedData.layers[currentLayerIndex]?.moves.length-1??0;
+            const max=currentLayerMaxIdx();
             playAccum+=playSpeed;
             if(playAccum>=1){
                 const steps=Math.floor(playAccum); playAccum-=steps;
@@ -1199,9 +1517,9 @@
 
         document.getElementById('btn-play').addEventListener('click',togglePlay);
         document.getElementById('btn-rewind').addEventListener('click',()=>{ stopAnimation(); setPathProgress(0); });
-        document.getElementById('btn-fast-forward').addEventListener('click',()=>{ stopAnimation(); setPathProgress(parsedData.layers[currentLayerIndex]?.moves.length-1??0); });
+        document.getElementById('btn-fast-forward').addEventListener('click',()=>{ stopAnimation(); setPathProgress(currentLayerMaxIdx()); });
         document.getElementById('btn-step-back').addEventListener('click',()=>{ stopAnimation(); setPathProgress(Math.max(currentPathIndex-1,0)); });
-        document.getElementById('btn-step-fwd').addEventListener('click',()=>{ stopAnimation(); const max=parsedData.layers[currentLayerIndex]?.moves.length-1??0; setPathProgress(Math.min(currentPathIndex+1,max)); });
+        document.getElementById('btn-step-fwd').addEventListener('click',()=>{ stopAnimation(); setPathProgress(Math.min(currentPathIndex+1,currentLayerMaxIdx())); });
         document.getElementById('speed-slider').addEventListener('input',e=>{ const i=parseInt(e.target.value); playSpeed=SPEED_STEPS[i]; playAccum=0; document.getElementById('speed-label').textContent=SPEED_LABELS[i]; });
 
         // --- KEYBOARD SHORTCUTS ---
@@ -1209,12 +1527,12 @@
             if(e.target.tagName==='INPUT')return;
             switch(e.key){
                 case ' ':         e.preventDefault(); togglePlay(); break;
-                case 'ArrowUp':   if(currentLayerIndex+1<parsedData.layers.length)setLayer(currentLayerIndex+1); break;
+                case 'ArrowUp':   if(currentLayerIndex+1<layerCount())setLayer(currentLayerIndex+1); break;
                 case 'ArrowDown': if(currentLayerIndex-1>=0)setLayer(currentLayerIndex-1); break;
-                case 'ArrowRight':{ stopAnimation(); const max=parsedData.layers[currentLayerIndex]?.moves.length-1??0; setPathProgress(Math.min(currentPathIndex+10,max)); break; }
+                case 'ArrowRight':{ stopAnimation(); setPathProgress(Math.min(currentPathIndex+10,currentLayerMaxIdx())); break; }
                 case 'ArrowLeft': { stopAnimation(); setPathProgress(Math.max(currentPathIndex-10,0)); break; }
                 case 'Home': setLayer(0); break;
-                case 'End':  setLayer(parsedData.layers.length-1); break;
+                case 'End':  setLayer(layerCount()-1); break;
                 case 'r': case 'R': camera.position.set(-60,200,220); controls.target.set(128,20,-128); controls.update(); break;
             }
         });

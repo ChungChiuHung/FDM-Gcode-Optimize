@@ -11,6 +11,9 @@ class GCodeParser:
     # OOM protection: cap header accumulation on malformed files that never
     # emit a body-start marker (EXECUTABLE_BLOCK_START / LAYER_CHANGE).
     MAX_HEADER_LINES = 5000
+    # OOM protection: cap footer accumulation for files with missing/late
+    # EXECUTABLE_BLOCK_END markers that would otherwise buffer the whole body.
+    MAX_FOOTER_LINES = 2000
 
     def __init__(self):
         self.current_x, self.current_y, self.current_z = 0.0, 0.0, 0.0
@@ -69,7 +72,8 @@ class GCodeParser:
                     if self.pending_metadata:
                         self.footer_lines.extend([m + '\n' for m in self.pending_metadata])
                         self.pending_metadata = []
-                    self.footer_lines.append(line)
+                    if len(self.footer_lines) < self.MAX_FOOTER_LINES:
+                        self.footer_lines.append(line)
                     continue
 
                 if self._parse_line(line):
@@ -143,7 +147,7 @@ class GCodeParser:
         if new_z != self.current_z and new_z > 0:
             if self.current_layer_z is None:
                 self.current_layer_z = new_z
-            elif new_z > self.current_layer_z + 0.05:
+            elif new_z >= self.current_layer_z + 0.05:
                 if len(self.current_layer_moves) > 0:
                     self._pending_z = new_z
             elif new_z < self.current_layer_z - 2.0 and len(self.current_layer_moves) > 0:

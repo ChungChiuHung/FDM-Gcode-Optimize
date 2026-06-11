@@ -1,0 +1,7 @@
+{
+    "toolhead_mass_kg": 0.45,
+    "max_z_mm": 256.0,
+    "wipe_macro": [
+        "G150 P1 ; H2C Nozzle Wipe Sequence"
+    ]
+}

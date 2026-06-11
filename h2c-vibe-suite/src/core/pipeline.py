@@ -16,9 +16,11 @@ from src.core.io_manager import AtomicGCodeWriter
 from src.core.parser import GCodeParser
 from src.physics.materials import detect_filament_type, get_material_profile
 from src.physics.thermodynamics import get_base_temperature, calculate_thermal_state
-from src.physics.kinematics import AntiResonanceBrake
+from src.physics.kinematics import AntiResonanceBrake, generate_contour_wipe
 from src.safety.bounds_enforcer import get_hardware_bounds
 from src.safety.z_hop_injector import ZHopInjector  # 新增 Z-Hop 安全避障引擎
+from src.safety.travel_router import TravelRouter   # Avoid-Crossing-Perimeters / Combing
+from src.core.volumetric_wipe_injector import VolumetricWipeInjector, load_machine_profile
 
 # --- 核心安全檢查：碰撞沙盒 ---
 try:
@@ -44,7 +46,7 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
     with open(input_path, 'r', encoding='utf-8', errors='ignore') as f:
         for i, line in enumerate(f):
             header_lines.append(line)
-            if "; CONFIG_BLOCK_END" in line or i > 4000:
+            if "; CONFIG_BLOCK_END" in line or i >= GCodeParser.MAX_HEADER_LINES - 1:
                 break
     header_text = "".join(header_lines)
 
@@ -56,6 +58,11 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
     # 提取機台型號 (用於除錯與日誌識別)
     machine_match = re.search(r';\s*printer_model\s*[:=]\s*([^\n\r]+)', header_text, re.IGNORECASE)
     machine_type = machine_match.group(1).strip() if machine_match else "Unknown Printer"
+
+    _machine_prof = load_machine_profile(machine_type)
+    wipe_injector = VolumetricWipeInjector(_machine_prof) if _machine_prof else None
+    if wipe_injector:
+        print(f"[*] 噴嘴清潔模組 (Wipe Injector): 已載入 {machine_type} 配置，閾值 {VolumetricWipeInjector.VOLUMETRIC_WIPE_MM:.0f} mm")
 
     # PathOptimizer.hybrid_sort is DEPRECATED per specs/architecture.md:
     # custom TSP/serpentine sorting destroys slicer collision-avoidance and
@@ -73,6 +80,8 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
 
     # [!] 啟動 Z-Hop 幾何安全避障引擎 (依據材料自動給定抬升高度)
     hop_injector = ZHopInjector(z_hop=mat_profile.get("z_hop", 0.4))
+    # Combing router — XY dog-leg detour around registered walls.
+    travel_router = TravelRouter()
 
     if enable_recommendations:
         print("\n" + "="*50)
@@ -95,8 +104,9 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
     FILAMENT_AREA = 2.405  # 1.75mm 線材截面積
 
     # 3. 核心迴圈：讀取 Generator 並寫入暫存檔
-    with open(tmp_path, 'w', encoding='utf-8', newline='\n') as out:
-        
+    with open(tmp_path, 'w', encoding='utf-8', newline='\n') as _raw_out:
+        out = wipe_injector.make_filtered_writer(_raw_out) if wipe_injector else _raw_out
+
         if enable_recommendations:
             out.write("; === H2C AI QUALITY RECOMMENDATIONS ===\n")
             out.write("; [!] Retraction Min Travel: Recommended 0.4mm for small hole stringing prevention.\n")
@@ -169,19 +179,15 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
                                 continue
                         out.write(meta_line + '\n')
 
-                    # --- [!] CRITICAL FIX: 記錄牆面與頂面給避障引擎 ---
+                    # Register wall segments in the hop injector for Z-hop and combing.
+                    # 'wall' as a substring catches BOTH 'outer wall' AND 'inner wall'
+                    # (hole perimeters) so that travels crossing hollow geometries are
+                    # detected.  Without inner-wall registration, hop_injector.wall_segments
+                    # is empty when the nozzle travels across a hole and both Z-hop and
+                    # the combing router silently pass through.
                     if move['type'] == 'extrude' and not is_system_move:
-                        if any(kw in feat_lower for kw in ['outer wall', 'top surface', 'wall-outer', 'external']):
+                        if any(kw in feat_lower for kw in ['wall', 'external', 'top surface']):
                             hop_injector.add_wall_seg(move['start'][0], move['start'][1], move['end'][0], move['end'][1])
-
-                    pending_hop = ""
-                    if move['type'] == 'travel' and not is_system_move:
-                        pending_hop = hop_injector.get_hop_gcode(
-                            frm=move['start'],
-                            to=move['end'],
-                            cur_z=move['start'][2],
-                            travel_f=int(move['feedrate'])
-                        )
 
                     if feat and feat != active_feat:
                         out.write(f"{feat}\n")
@@ -230,12 +236,25 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
                         # 100% 完美物理隔離：一字不差地寫入原切片軟體的系統/校正指令！
                         out.write(f"{move['raw_line']}\n")
                     else:
-                        # --- AI Z-Hop: use pre-computed pending_hop (already accounts for
-                        #     brake coordination; feedrate is updated to clamped f_val) ---
+                        # --- AI Contour Wipe: backtrack along last extrusion line before
+                        #     departing on hole / circle / small-perimeter travels to cut
+                        #     stringing at the seam.  Fires before Z-hop so the micro-lift
+                        #     gives clearance for the backtrack XY move. ---
+                        if (move['type'] == 'travel' and not is_system_move
+                                and prev_move is not None and prev_move['type'] == 'extrude'):
+                            prev_feat_lower = prev_move.get('feature', '').lower()
+                            if any(kw in prev_feat_lower for kw in ('circle', 'hole', 'small')):
+                                contour_wipe = generate_contour_wipe(
+                                    prev_move,
+                                    wipe_dist=1.5,
+                                    travel_f=int(f_val)
+                                )
+                                if contour_wipe:
+                                    out.write(contour_wipe)
+
+                        # --- AI Z-Hop: computed once, after f_val is fully clamped ---
                         is_hopped = False
-                        if pending_hop:
-                            # Re-issue with final clamped feedrate so the travel speed
-                            # respects the first-layer cap applied in f_val above.
+                        if move['type'] == 'travel' and not is_system_move:
                             final_hop = hop_injector.get_hop_gcode(
                                 frm=move['start'],
                                 to=move['end'],
@@ -247,6 +266,34 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
                                 is_hopped = True
 
                         if not is_hopped:
+                            # --- AI Combing: XY dog-leg detour around registered walls.
+                            # Only fires for pure XY travels (no Z change, no arc, no E)
+                            # longer than MIN_DETOUR_DIST.  Z-hop takes priority — this
+                            # block is only reached when is_hopped is False.
+                            if (move['type'] == 'travel' and not is_system_move
+                                    and move.get('has_xy', True)
+                                    and abs(move['end'][2] - move['start'][2]) < 0.001
+                                    and move.get('g_code', 1) not in (2, 3)):
+                                t_dist = math.hypot(
+                                    move['end'][0] - move['start'][0],
+                                    move['end'][1] - move['start'][1],
+                                )
+                                if t_dist > TravelRouter.MIN_DETOUR_DIST:
+                                    waypoints = travel_router.route_safe_travel(
+                                        start_pt=(move['start'][0], move['start'][1]),
+                                        end_pt=(move['end'][0], move['end'][1]),
+                                        hop_injector=hop_injector,
+                                    )
+                                    if len(waypoints) > 1:
+                                        print(f"[*] Detour successfully generated with {len(waypoints)} waypoints")
+                                    # Write only the intermediate waypoints; the final
+                                    # destination is handled by the reconstruction block below.
+                                    for wp_x, wp_y in waypoints[:-1]:
+                                        wx = max(hw_min_x, min(hw_max_x, wp_x))
+                                        wy = max(hw_min_y, min(hw_max_y, wp_y))
+                                        out.write("; --- AI Combing: Obstacle Detour ---\n")
+                                        out.write(f"G1 X{wx:.3f} Y{wy:.3f} F{int(f_val)}\n")
+
                             # 模型特徵：套用坐標箝制與浮點數優化重構
                             ex = max(hw_min_x, min(hw_max_x, move['end'][0]))
                             ey = max(hw_min_y, min(hw_max_y, move['end'][1]))
@@ -280,6 +327,9 @@ def auto_optimize_gcode(input_path: str, is_heavy_toolhead: bool = True, enable_
                                     out.write(brake_gcode + "\n")
 
                     prev_move = move
+
+        if hasattr(out, 'flush'):
+            out.flush()
 
     # 4. Concatenate: header + body + footer (atomic — safe against crash/interrupt)
     try:

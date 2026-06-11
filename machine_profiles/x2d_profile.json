@@ -1,0 +1,8 @@
+{
+    "toolhead_mass_kg": 0.45,
+    "max_z_mm": 256.0,
+    "wipe_macro": [
+        "G150.1 ; X2D Primary Nozzle Wipe",
+        "G150.2 ; X2D Secondary Nozzle Purge"
+    ]
+}

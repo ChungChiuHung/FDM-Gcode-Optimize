@@ -16,3 +16,10 @@ ENV/
 
 # Tool specific
 .uv/
+
+# 3D Printing & Logs
+*.gcode
+*.gcode.bak
+*.bak
+*.3mf
+logs/

@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 
 try:
     from mcp.server.fastmcp import FastMCP
+    from src.core.io_manager import AtomicGCodeWriter
 except ImportError:
     # Print errors to STDERR so we don't corrupt the MCP stdio stream
     print("'mcp' package not found. Ensure your venv is active.", file=sys.stderr)
@@ -111,8 +112,7 @@ def inject_m1004_at_feature(file_path: str, feature_type: str, command_s_value: 
             modified_lines.append(f"M1004 S0 ; AI MCP: Feature end at EOF - turning off\n")
             changes_made += 1
 
-        # CRITICAL FIX: Enforce Linux line endings here as well
-        with open(file_path, 'w', encoding='utf-8', newline='\n') as f:
+        with AtomicGCodeWriter.atomic_write(file_path) as f:
             f.writelines(modified_lines)
 
         return f"Success: Injected {changes_made} M1004 commands (Start/End) within the print data section."
